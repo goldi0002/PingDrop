@@ -1,0 +1,39 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36301.6
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PingDrop", "PingDrop\PingDrop.csproj", "{F8C21094-9392-41BF-8C07-97C538420110}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{900245BE-2309-4CA2-9D05-B98FF43FDEBC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PingDrop.Web.Test", "PingDrop.Web.Test\PingDrop.Web.Test.csproj", "{FFC6040A-C8AE-4847-AE43-34E66F870446}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F8C21094-9392-41BF-8C07-97C538420110}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F8C21094-9392-41BF-8C07-97C538420110}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F8C21094-9392-41BF-8C07-97C538420110}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F8C21094-9392-41BF-8C07-97C538420110}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FFC6040A-C8AE-4847-AE43-34E66F870446}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FFC6040A-C8AE-4847-AE43-34E66F870446}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FFC6040A-C8AE-4847-AE43-34E66F870446}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FFC6040A-C8AE-4847-AE43-34E66F870446}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F8C21094-9392-41BF-8C07-97C538420110} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{FFC6040A-C8AE-4847-AE43-34E66F870446} = {900245BE-2309-4CA2-9D05-B98FF43FDEBC}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {34F447ED-FF12-4FFE-8236-27617C7C283C}
+	EndGlobalSection
+EndGlobal

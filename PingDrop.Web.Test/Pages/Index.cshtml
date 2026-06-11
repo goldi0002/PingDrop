@@ -1,0 +1,622 @@
+﻿@page
+@model IndexModel
+@{
+    ViewData["Title"] = "PingDrop Test Dashboard";
+}
+
+<div class="container mt-5">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1>PingDrop Test Dashboard</h1>
+            <p class="text-muted">Real-time notification testing interface</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Connection Status -->
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Connection Status</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <small class="text-muted">Client ID:</small>
+                        <div id="clientId" class="font-monospace small text-break" style="word-break: break-all;"></div>
+                    </div>
+                    <div class="mb-3">
+                        <small class="text-muted">Connection Status:</small>
+                        <div id="connectionStatus" class="badge bg-danger">Disconnected</div>
+                    </div>
+                    <div>
+                        <small class="text-muted">Events Received:</small>
+                        <div id="eventCount" class="h4">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Send Notification Form -->
+        <div class="col-md-8 mb-4">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Send Notification</h5>
+                </div>
+                <div class="card-body">
+                    <form id="notificationForm" onsubmit="sendNotification(event)">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="targetUserInput" class="form-label">Target User ID</label>
+                                <input type="text" class="form-control" id="targetUserInput" value="1"
+                                       placeholder="User ID or leave blank for broadcast">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="eventTypeInput" class="form-label">Event Type</label>
+                                <input type="text" class="form-control" id="eventTypeInput" value="notification"
+                                       placeholder="e.g., notification, message">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="titleInput" class="form-label">Title</label>
+                            <input type="text" class="form-control" id="titleInput" placeholder="Notification title"
+                                   value="Test Notification">
+                        </div>
+                        <div class="mb-3">
+                            <label for="messageInput" class="form-label">Message</label>
+                            <textarea class="form-control" id="messageInput" rows="3"
+                                      placeholder="Notification message">This is a test notification from PingDrop</textarea>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="severityInput" class="form-label">Severity</label>
+                                <select class="form-control" id="severityInput">
+                                    <option value="info">Info</option>
+                                    <option value="success">Success</option>
+                                    <option value="warning">Warning</option>
+                                    <option value="error">Error</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="durationInput" class="form-label">Display Duration (ms)</label>
+                                <input type="number" class="form-control" id="durationInput" value="3000"
+                                       placeholder="3000">
+                            </div>
+                        </div>
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <button type="button" class="btn btn-secondary" onclick="clearForm()">Clear</button>
+                            <button type="submit" class="btn btn-primary">Send Notification</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Received Events Log -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Received Events</h5>
+                    <button type="button" class="btn btn-sm btn-light" onclick="clearEvents()">Clear Log</button>
+                </div>
+                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                    <div id="eventsLog" style="font-family: monospace; font-size: 12px;">
+                        <p class="text-muted">Waiting for events...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Connection Testing -->
+    <div class="row mt-4">
+        <div class="col-lg-6 mb-4">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Send to Multiple Users</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="multiUserIdInput" class="form-label">User IDs (comma-separated)</label>
+                        <input type="text" class="form-control" id="multiUserIdInput" placeholder="e.g., 1, 2, 3, 4"
+                               value="1, 2, 3, 4">
+                    </div>
+                    <div class="mb-3">
+                        <label for="multiTitleInput" class="form-label">Title</label>
+                        <input type="text" class="form-control" id="multiTitleInput" value="Multi-User Notification"
+                               placeholder="Message title">
+                    </div>
+                    <div class="mb-3">
+                        <label for="multiMessageInput" class="form-label">Message</label>
+                        <textarea class="form-control" id="multiMessageInput" rows="2"
+                                  placeholder="Message for all users">This message was sent to multiple users</textarea>
+                    </div>
+                    <button type="button" class="btn btn-info w-100" onclick="sendToMultipleUsers()">Send to All
+                        Users</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6 mb-4">
+                <div class="card">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">Load Test</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="loadTestUserId" class="form-label">Target User ID</label>
+                            <input type="text" class="form-control" id="loadTestUserId" value="1" placeholder="User ID">
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="loadTestCount" class="form-label">Notification Count</label>
+                                <input type="number" class="form-control" id="loadTestCount" value="10" min="1" max="100">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="loadTestDelay" class="form-label">Delay (ms)</label>
+                                <input type="number" class="form-control" id="loadTestDelay" value="100" min="0" max="5000">
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-secondary w-100" onclick="runLoadTest()">Start Load
+                            Test</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions & Stress Test -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">Quick Test Actions & Stress Testing</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>Quick Actions</h6>
+                                    <div class="btn-group-vertical w-100" role="group">
+                                        <button type="button" class="btn btn-outline-primary"
+                                                onclick="sendQuickTest('success')">
+                                            ✓ Send Success Notification
+                                        </button>
+                                        <button type="button" class="btn btn-outline-warning"
+                                                onclick="sendQuickTest('warning')">
+                                            ⚠ Send Warning Notification
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger" onclick="sendQuickTest('error')">
+                                            ✕ Send Error Notification
+                                        </button>
+                                        <button type="button" class="btn btn-outline-info" onclick="sendQuickTest('broadcast')">
+                                            📢 Broadcast Message
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>Stress Testing</h6>
+                                    <div class="alert alert-light mb-3" style="font-size: 0.85rem;">
+                                        <strong>Stress Test:</strong> Sends 15 notifications to 5 concurrent users to test
+                                        system load.
+                                    </div>
+                                    <button type="button" class="btn btn-danger w-100" onclick="runStressTest()">
+                                        🔥 Run Stress Test
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Multi-Connection Instructions -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header bg-dark text-white">
+                            <h5 class="mb-0">How to Test Multiple Connections</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>🌐 Method 1: Multiple Browser Tabs</h6>
+                                    <ol style="font-size: 0.9rem;">
+                                        <li>Open the dashboard: <code>http://localhost:5000</code></li>
+                                        <li>Open 2-5 more tabs with the same URL</li>
+                                        <li>Each tab connects with User ID "1" by default</li>
+                                        <li>Modify User IDs in one of the tab's "Target User ID" field</li>
+                                        <li>Change query parameter: <code>?uId=2</code>, <code>?uId=3</code>, etc.</li>
+                                        <li>Send notifications and watch them appear in corresponding tabs</li>
+                                    </ol>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>🚀 Method 2: Use the Built-in Tools</h6>
+                                    <ol style="font-size: 0.9rem;">
+                                        <li><strong>Send to Multiple Users:</strong> Enter user IDs and send one message to all
+                                        </li>
+                                        <li><strong>Load Test:</strong> Send multiple notifications to one user with delays</li>
+                                        <li><strong>Stress Test:</strong> Send 15 notifications to 5 users simultaneously</li>
+                                        <li>Monitor the Event Log and Connection Status</li>
+                                        <li>Check the built-in PingDrop Dashboard at <code>/pingdrop</code></li>
+                                    </ol>
+                                </div>
+                            </div>
+                            <hr class="my-3">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>💡 Tip: Manual Multi-Tab Testing</h6>
+                                    <ol style="font-size: 0.85rem;">
+                                        <li>Open: <a href="?uId=1" target="_blank">Dashboard for User 1</a></li>
+                                        <li>Open: <a href="?uId=2" target="_blank">Dashboard for User 2</a></li>
+                                        <li>Open: <a href="?uId=3" target="_blank">Dashboard for User 3</a></li>
+                                        <li>Right-click links and open in new tab</li>
+                                    </ol>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>📊 Performance Metrics</h6>
+                                    <ul style="font-size: 0.85rem;">
+                                        <li><strong>Events Received:</strong> Total count in current session</li>
+                                        <li><strong>Connection Status:</strong> Real-time SSE status</li>
+                                        <li><strong>Event Log:</strong> Last 50 events with timestamps</li>
+                                        <li><strong>Open DevTools (F12):</strong> Check Network tab for SSE stream</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @section Scripts {
+            <script>
+                const STORAGE_KEY = "pingdrop-client-id";
+                let eventCount = 0;
+                let eventSource = null;
+
+                // Initialize client ID
+                let clientId = localStorage.getItem(STORAGE_KEY);
+                if (!clientId) {
+                    clientId = crypto.randomUUID();
+                    localStorage.setItem(STORAGE_KEY, clientId);
+                }
+
+                document.getElementById('clientId').textContent = clientId;
+
+                // Check for uId in URL query parameters
+                const urlParams = new URLSearchParams(window.location.search);
+                const urlUserId = urlParams.get('uid');
+                if (urlUserId) {
+                    document.getElementById('targetUserInput').value = urlUserId;
+                }
+
+                // Connect to PingDrop stream
+                function connectToPingDrop() {
+                    const targetUserId = document.getElementById('targetUserInput').value || '1';
+                    const eventTypes = "notification,message,test,stress-test";
+
+                    eventSource = new EventSource(`/pingdrop/stream?eventType=${eventTypes}&uId=${targetUserId}`);
+
+                    eventSource.onopen = () => {
+                        document.getElementById('connectionStatus').innerHTML = '<span class="badge bg-success">Connected</span>';
+                    };
+
+                    eventSource.onmessage = (e) => {
+                        addEventToLog('Generic Message', e.data);
+                    };
+
+                    eventSource.addEventListener('notification', (e) => {
+                        addEventToLog('Notification', e.data);
+                        eventCount++;
+                        updateEventCount();
+                    });
+
+                    eventSource.addEventListener('message', (e) => {
+                        addEventToLog('Message', e.data);
+                        eventCount++;
+                        updateEventCount();
+                    });
+
+                    eventSource.addEventListener('test', (e) => {
+                        addEventToLog('Test Event', e.data);
+                        eventCount++;
+                        updateEventCount();
+                    });
+
+                    eventSource.addEventListener('stress-test', (e) => {
+                        addEventToLog('Stress Test', e.data);
+                        eventCount++;
+                        updateEventCount();
+                    });
+
+                    eventSource.onerror = (e) => {
+                        if (e.readyState === EventSource.CLOSED) {
+                            document.getElementById('connectionStatus').innerHTML = '<span class="badge bg-danger">Disconnected</span>';
+                            console.error('EventSource closed');
+                        }
+                    };
+                }
+
+                // Add event to log
+                function addEventToLog(eventType, data) {
+                    const logElement = document.getElementById('eventsLog');
+                    const timestamp = new Date().toLocaleTimeString();
+
+                    let logEntry = document.createElement('div');
+                    logEntry.className = 'mb-2 p-2 bg-light border rounded';
+
+                    try {
+                        const parsedData = JSON.parse(data);
+                        logEntry.innerHTML = `<strong>[${timestamp}] ${eventType}:</strong><br><pre>${JSON.stringify(parsedData, null, 2)}</pre>`;
+                    } catch {
+                        logEntry.innerHTML = `<strong>[${timestamp}] ${eventType}:</strong><br><code>${data}</code>`;
+                    }
+
+                    if (logElement.querySelector('.text-muted')) {
+                        logElement.innerHTML = '';
+                    }
+
+                    logElement.insertBefore(logEntry, logElement.firstChild);
+
+                    // Keep only last 50 entries
+                    while (logElement.children.length > 50) {
+                        logElement.removeChild(logElement.lastChild);
+                    }
+                }
+
+                // Update event count
+                function updateEventCount() {
+                    document.getElementById('eventCount').textContent = eventCount;
+                }
+
+                // Send notification
+                async function sendNotification(event) {
+                    event.preventDefault();
+
+                    const targetUserId = document.getElementById('targetUserInput').value || null;
+                    const eventType = document.getElementById('eventTypeInput').value || 'notification';
+                    const title = document.getElementById('titleInput').value;
+                    const message = document.getElementById('messageInput').value;
+                    const severity = document.getElementById('severityInput').value;
+                    const duration = parseInt(document.getElementById('durationInput').value) || 3000;
+
+                    const payload = {
+                        title: title,
+                        message: message,
+                        severity: severity,
+                        duration: duration,
+                        timestamp: new Date().toISOString(),
+                        eventType: eventType,
+                        targetUserId: targetUserId
+                    };
+
+                    try {
+                        const response = await fetch('/send-notification', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (response.ok) {
+                            const result = await response.json();
+                            showAlert('Notification sent successfully!', 'success');
+                            console.log('Response:', result);
+                        } else {
+                            showAlert('Failed to send notification', 'danger');
+                        }
+                    } catch (error) {
+                        console.error('Error:', error);
+                        showAlert('Error sending notification: ' + error.message, 'danger');
+                    }
+                }
+
+                // Quick test actions
+                async function sendQuickTest(type) {
+                    let payload = {};
+
+                    switch (type) {
+                        case 'success':
+                            payload = {
+                                targetUserId: '1',
+                                eventType: 'notification',
+                                title: 'Success!',
+                                message: 'This is a success notification',
+                                severity: 'success'
+                            };
+                            break;
+                        case 'warning':
+                            payload = {
+                                targetUserId: '1',
+                                eventType: 'notification',
+                                title: 'Warning',
+                                message: 'This is a warning notification',
+                                severity: 'warning'
+                            };
+                            break;
+                        case 'error':
+                            payload = {
+                                targetUserId: '1',
+                                eventType: 'notification',
+                                title: 'Error Occurred',
+                                message: 'This is an error notification',
+                                severity: 'error'
+                            };
+                            break;
+                        case 'broadcast':
+                            payload = {
+                                targetUserId: null,
+                                eventType: 'message',
+                                title: 'Broadcast Message',
+                                message: 'This is a broadcast message sent to all connected clients',
+                                severity: 'info'
+                            };
+                            break;
+                    }
+
+                    try {
+                        const response = await fetch('/send-notification', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (response.ok) {
+                            showAlert(type + ' notification sent!', 'success');
+                        }
+                    } catch (error) {
+                        showAlert('Error: ' + error.message, 'danger');
+                    }
+                }
+
+                // Send to multiple users
+                async function sendToMultipleUsers() {
+                    const userIdText = document.getElementById('multiUserIdInput').value.trim();
+                    const title = document.getElementById('multiTitleInput').value.trim();
+                    const message = document.getElementById('multiMessageInput').value.trim();
+
+                    if (!userIdText || !title || !message) {
+                        showAlert('User IDs, Title, and Message are required', 'warning');
+                        return;
+                    }
+
+                    const userIds = userIdText.split(',').map(id => id.trim()).filter(id => id);
+
+                    if (userIds.length === 0) {
+                        showAlert('Please enter valid user IDs', 'warning');
+                        return;
+                    }
+
+                    const payload = {
+                        title: title,
+                        message: message,
+                        userIds: userIds,
+                        severity: 'info',
+                        eventType: 'notification'
+                    };
+
+                    try {
+                        const response = await fetch('/send-to-multiple', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (response.ok) {
+                            const result = await response.json();
+                            showAlert(`✓ ${result.message}`, 'success');
+                        } else {
+                            showAlert('Failed to send to multiple users', 'danger');
+                        }
+                    } catch (error) {
+                        showAlert('Error: ' + error.message, 'danger');
+                    }
+                }
+
+                // Run load test
+                async function runLoadTest() {
+                    const targetUserId = document.getElementById('loadTestUserId').value.trim();
+                    const notificationCount = parseInt(document.getElementById('loadTestCount').value) || 10;
+                    const delayMs = parseInt(document.getElementById('loadTestDelay').value) || 100;
+
+                    if (!targetUserId) {
+                        showAlert('Please enter a target user ID', 'warning');
+                        return;
+                    }
+
+                    const payload = {
+                        targetUserId: targetUserId,
+                        notificationCount: notificationCount,
+                        delayMs: delayMs
+                    };
+
+                    try {
+                        const response = await fetch('/load-test', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (response.ok) {
+                            const result = await response.json();
+                            showAlert(`🚀 ${result.message}`, 'info');
+                            console.log('Load test started. Will send ' + notificationCount + ' notifications to user ' + targetUserId);
+                        } else {
+                            showAlert('Failed to start load test', 'danger');
+                        }
+                    } catch (error) {
+                        showAlert('Error: ' + error.message, 'danger');
+                    }
+                }
+
+                // Run stress test
+                async function runStressTest() {
+                    if (!confirm('Run stress test? This will send 15 notifications to 5 concurrent users.')) {
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch('/stress-test', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            }
+                        });
+
+                        if (response.ok) {
+                            const result = await response.json();
+                            showAlert(`🔥 ${result.message}`, 'danger');
+                            console.log('Stress test completed');
+                        } else {
+                            showAlert('Failed to run stress test', 'danger');
+                        }
+                    } catch (error) {
+                        showAlert('Error: ' + error.message, 'danger');
+                    }
+                }
+
+                // Clear form
+                function clearForm() {
+                    document.getElementById('notificationForm').reset();
+                    document.getElementById('targetUserInput').value = '1';
+                    document.getElementById('eventTypeInput').value = 'notification';
+                    document.getElementById('severityInput').value = 'info';
+                    document.getElementById('durationInput').value = '3000';
+                }
+
+                // Clear events log
+                function clearEvents() {
+                    eventCount = 0;
+                    updateEventCount();
+                    document.getElementById('eventsLog').innerHTML = '<p class="text-muted">Waiting for events...</p>';
+                }
+
+                // Show alert
+                function showAlert(message, type) {
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+                    alertDiv.setAttribute('role', 'alert');
+                    alertDiv.innerHTML = `
+                            ${message}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        `;
+
+                    const container = document.querySelector('.container');
+                    container.insertBefore(alertDiv, container.firstChild);
+
+                    setTimeout(() => alertDiv.remove(), 5000);
+                }
+
+                // Initialize on page load
+                document.addEventListener('DOMContentLoaded', () => {
+                    connectToPingDrop();
+                });
+            </script>
+        }

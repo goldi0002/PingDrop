@@ -1,0 +1,104 @@
+html {
+  font-size: 14px;
+}
+
+@media (min-width: 768px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+.btn:focus,
+.btn:active:focus,
+.btn-link.nav-link:focus,
+.form-control:focus,
+.form-check-input:focus {
+  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  margin-bottom: 60px;
+}
+
+/* PingDrop Test Dashboard Styles */
+#eventsLog {
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
+#eventsLog>div {
+  border-left: 3px solid #007bff;
+  transition: all 0.3s ease;
+}
+
+#eventsLog>div:hover {
+  background-color: #e7f3ff !important;
+}
+
+#eventsLog pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #333;
+}
+
+.card {
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+  border: none;
+  transition: all 0.3s ease;
+}
+
+.card:hover {
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+.badge {
+  padding: 0.5rem 0.75rem;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: #80bdff;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+#notificationForm .form-label {
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.text-muted {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.font-monospace {
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.alert {
+  border: none;
+  border-left: 4px solid;
+}
+
+.alert-success {
+  border-left-color: #28a745;
+}
+
+.alert-danger {
+  border-left-color: #dc3545;
+}
+
+.alert-warning {
+  border-left-color: #ffc107;
+}
+
+.alert-info {
+  border-left-color: #17a2b8;
+}
