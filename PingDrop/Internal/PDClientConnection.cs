@@ -5,12 +5,14 @@ namespace PingDrop.Internal
 {
     internal sealed class PDClientConnection : IAsyncDisposable
     {
+        private const int DefaultQueueCapacity = 20;
+
         private readonly HashSet<string>? _subscribedEventTypes;
         private int _disposed;
 
         private long _notificationsSent;
         private long _notificationsDropped;
-        private DateTime _lastActivityAtUtc;
+        private long _lastActivityAtUtcTicks;
         private static long _nextConnectionId;
 
         public long ConnectionId { get; } = Interlocked.Increment(ref _nextConnectionId);
@@ -21,7 +23,7 @@ namespace PingDrop.Internal
 
         public DateTime ConnectedAtUtc { get; }
 
-        public DateTime LastActivityAtUtc => _lastActivityAtUtc;
+        public DateTime LastActivityAtUtc => new(Interlocked.Read(ref _lastActivityAtUtcTicks), DateTimeKind.Utc);
 
         public bool IsDisposed => Volatile.Read(ref _disposed) == 1;
 
@@ -50,13 +52,13 @@ namespace PingDrop.Internal
             SubscriberKey = subscriberKey;
 
             ConnectedAtUtc = DateTime.UtcNow;
-            _lastActivityAtUtc = ConnectedAtUtc;
+            _lastActivityAtUtcTicks = ConnectedAtUtc.Ticks;
 
-            NotificationChannel = Channel.CreateBounded<PDNotification>(new BoundedChannelOptions(20)
+            NotificationChannel = Channel.CreateBounded<PDNotification>(new BoundedChannelOptions(DefaultQueueCapacity)
             {
                 SingleReader = true,
                 SingleWriter = false,
-                FullMode = BoundedChannelFullMode.DropOldest
+                FullMode = BoundedChannelFullMode.Wait
             });
         }
 
@@ -93,6 +95,7 @@ namespace PingDrop.Internal
         public void MarkDelivered()
         {
             Interlocked.Increment(ref _notificationsSent);
+            Touch();
         }
 
         public bool IsSubscribedTo(string eventType)
@@ -102,7 +105,7 @@ namespace PingDrop.Internal
 
         private void Touch()
         {
-            _lastActivityAtUtc = DateTime.UtcNow;
+            Interlocked.Exchange(ref _lastActivityAtUtcTicks, DateTime.UtcNow.Ticks);
         }
 
         private void ThrowIfDisposed()

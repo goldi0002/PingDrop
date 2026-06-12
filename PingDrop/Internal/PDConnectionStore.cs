@@ -49,6 +49,8 @@ namespace PingDrop.Internal
             if (!_all.TryRemove(connectionId, out var client))
                 return;
 
+            _ = client.DisposeAsync();
+
             if (string.IsNullOrWhiteSpace(client.SubscriberKey))
                 return;
 

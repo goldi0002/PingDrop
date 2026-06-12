@@ -1,6 +1,5 @@
 ﻿using PingDrop.Abstractions;
 using PingDrop.Models;
-using System.Collections.Concurrent;
 
 namespace PingDrop.Internal
 {
