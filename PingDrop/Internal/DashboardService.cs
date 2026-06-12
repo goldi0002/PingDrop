@@ -49,21 +49,19 @@ namespace PingDrop.Internal
 
         public IReadOnlyCollection<PDDashboardModel.EventStreamMonitor> GetEventStream()
         {
-            var result = new List<PDDashboardModel.EventStreamMonitor>();
-            var events = _eventHistoryStore.GetAll().OrderByDescending(e => e.Id).Take(100);
-            //foreach (var e in events)
-            //{
-            //    result.Add(new PDDashboardModel.EventStreamMonitor
-            //    {
-            //        Timestamp = e.TimestampUtc.ToString("yyyy-MM-dd hh:mm:ss"),
-            //        EventName = e.EventType,
-            //        ConnectionId = e.,
-            //        deliverdCount = e.DeliveredCount,
-            //        Status = e.DeliveredCount > 0 ? "Delivered" : "Pending",
-            //        Size = $"{e.Payload?.Length ?? 0} chars"
-            //    });
-            //}
-            return result;
+            return _eventHistoryStore.GetAll()
+                .OrderByDescending(static e => e.Id)
+                .Take(100)
+                .Select(static e => new PDDashboardModel.EventStreamMonitor
+                {
+                    Timestamp = e.TimestampUtc.ToString("yyyy-MM-dd hh:mm:ss"),
+                    EventName = e.EventType,
+                    ConnectionId = e.TargetKey,
+                    deliverdCount = 0,
+                    Status = "Queued",
+                    Size = $"{e.Payload?.Length ?? 0} chars"
+                })
+                .ToArray();
         }
 
         public IReadOnlyCollection<PDMetrics> GetMetrics()
@@ -82,7 +80,16 @@ namespace PingDrop.Internal
 
         public Task<Tuple<PDDashboardModel.PDServerHealth, PDDashboardModel.PDServerHealthUsage>> GetServerHealthAsync(CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            Process process = Process.GetCurrentProcess();
+            long managedMemoryMb = GC.GetTotalMemory(false) / (1024 * 1024);
+            long workingSetMb = process.WorkingSet64 / (1024 * 1024);
+
+            var health = new PDDashboardModel.PDServerHealth("Server", "Healthy", "ri-heart-pulse-line");
+            var usage = new PDDashboardModel.PDServerHealthUsage("Memory", $"Managed {managedMemoryMb:N0} MB / Working set {workingSetMb:N0} MB", "ri-cpu-line");
+
+            return Task.FromResult(Tuple.Create(health, usage));
         }
     }
 }

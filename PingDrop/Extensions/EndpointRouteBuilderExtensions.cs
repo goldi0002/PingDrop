@@ -110,7 +110,6 @@ namespace PingDrop.Extensions
                         try
                         {
                             await PDSseWriter.WriteAsync(context.Response, evt, context.RequestAborted);
-                            await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Event dispatched to client {client.ConnectionId}: {evt.EventType}", DateTime.UtcNow.ToString("O")), "log", context.RequestAborted);
                             hub.IncrementSuccessfulDispatches();
                             client.MarkDelivered();
                         }
@@ -198,7 +197,7 @@ namespace PingDrop.Extensions
             endpoints.MapGet(options.Dashboard.Path + "/app.js", async context =>
             {
                 string? js = await PDEmbeddedFileProvider.ReadAsync("app.js");
-                context.Response.ContentType = "text/javscript";
+                context.Response.ContentType = "text/javascript";
                 await context.Response.WriteAsync(js);
             });
             endpoints.MapGet(options.Dashboard.Path, async context =>
@@ -223,7 +222,7 @@ namespace PingDrop.Extensions
             metrics.Insert(1, new PDMetrics("Events Published", hub.TotalEventsPublished.ToString("N0"),
                 "ri-send-plane-2-line", "Since restart"));
 
-            metrics.Insert(2, new PDMetrics("Queued Notifications", hubMetrics.SuccessfulDeliveries.ToString("N0"), "ri-send-plane-2-line", "Since restart"));
+            metrics.Insert(2, new PDMetrics("Queued Notifications", hub.QueuedNotifications.ToString("N0"), "ri-send-plane-2-line", "Pending across connections"));
 
             metrics.Insert(3, new PDMetrics("Attempted Deliveries", hubMetrics.AttemptedDeliveries.ToString("N0"), "ri-refresh-line", "Since restart"));
 
@@ -303,7 +302,18 @@ namespace PingDrop.Extensions
 
             endpoints.MapPost(options.Dashboard.Path + "/send-notification", async context =>
             {
-                NotificationRequest? request = await context.Request.ReadFromJsonAsync<NotificationRequest>(context.RequestAborted);
+                NotificationRequest? request;
+                try
+                {
+                    request = await context.Request.ReadFromJsonAsync<NotificationRequest>(context.RequestAborted);
+                }
+                catch (JsonException)
+                {
+                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure("Invalid JSON request payload"), _jsonOptions,
+                        context.RequestAborted);
+                    return;
+                }
 
                 if (request is null)
                 {
@@ -316,6 +326,11 @@ namespace PingDrop.Extensions
                 bool IsValidRequest(NotificationRequest req)
                 {
                     if (string.IsNullOrWhiteSpace(req.TargetType) || string.IsNullOrWhiteSpace(req.EventName) || req.Payload is null)
+                    {
+                        return false;
+                    }
+
+                    if (req.EventName.Contains('\r') || req.EventName.Contains('\n'))
                     {
                         return false;
                     }

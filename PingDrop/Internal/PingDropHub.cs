@@ -24,9 +24,12 @@ namespace PingDrop.Internal
 
         public int ConnectedClientsCount => _connectionStore.Count;
 
+        public long QueuedNotifications => _connectionStore.GetAll().Sum(static client => client.PendingNotifications);
+
         public ValueTask BroadcastAsync<T>(T notification, string eventType = "message", CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(notification);
+            string normalizedEventType = NotificationFactory.NormalizeEventType(eventType);
             cancellationToken.ThrowIfCancellationRequested();
 
             if (_connectionStore.Count == 0)
@@ -34,19 +37,19 @@ namespace PingDrop.Internal
                 return ValueTask.CompletedTask;
             }
 
-            PDNotification pdNotification = _notificationFactory.CreateNotification(notification, eventType);
+            PDNotification pdNotification = _notificationFactory.CreateNotification(notification, normalizedEventType);
 
             Interlocked.Increment(ref _totalEventsPublished);
             _eventHistoryStore.AddEvent(pdNotification);
 
             using Activity? activity = _activitySource.StartActivity("PingDrop.Broadcast", ActivityKind.Internal);
 
-            activity?.SetTag(InternalConstants.EventTypeTag, eventType);
+            activity?.SetTag(InternalConstants.EventTypeTag, normalizedEventType);
             activity?.SetTag(InternalConstants.EventIdTag, pdNotification.Id);
             activity?.SetTag(InternalConstants.EventPayloadSizeTag, pdNotification.Payload?.Length);
             activity?.SetTag(InternalConstants.ClientsCountTag, _connectionStore.Count);
 
-            DeliverNotification(pdNotification, eventType, _connectionStore.GetAll());
+            DeliverNotification(pdNotification, normalizedEventType, _connectionStore.GetAll());
 
             return ValueTask.CompletedTask;
         }
@@ -55,6 +58,7 @@ namespace PingDrop.Internal
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
             ArgumentNullException.ThrowIfNull(notification);
+            string normalizedEventType = NotificationFactory.NormalizeEventType(eventType);
             cancellationToken.ThrowIfCancellationRequested();
 
             int clientCount = _connectionStore.CountByKey(targetKey);
@@ -64,17 +68,17 @@ namespace PingDrop.Internal
                 return ValueTask.CompletedTask;
             }
 
-            PDNotification pdNotification = _notificationFactory.CreateNotification(notification, eventType, targetKey);
+            PDNotification pdNotification = _notificationFactory.CreateNotification(notification, normalizedEventType, targetKey);
             Interlocked.Increment(ref _totalEventsPublished);
             using Activity? activity = _activitySource.StartActivity("PingDrop.SendTo", ActivityKind.Internal);
 
-            activity?.SetTag(InternalConstants.EventTypeTag, eventType);
+            activity?.SetTag(InternalConstants.EventTypeTag, normalizedEventType);
             activity?.SetTag(InternalConstants.EventIdTag, pdNotification.Id);
             activity?.SetTag(InternalConstants.EventPayloadSizeTag, pdNotification.Payload?.Length);
             activity?.SetTag(InternalConstants.SubscriberKeyTag, targetKey);
             activity?.SetTag(InternalConstants.ClientsCountTag, clientCount);
 
-            DeliverNotification(pdNotification, eventType, _connectionStore.GetByKey(targetKey));
+            DeliverNotification(pdNotification, normalizedEventType, _connectionStore.GetByKey(targetKey));
 
             return ValueTask.CompletedTask;
         }

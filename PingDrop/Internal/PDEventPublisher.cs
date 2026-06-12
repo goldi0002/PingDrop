@@ -3,31 +3,29 @@ using System.Diagnostics;
 
 namespace PingDrop.Internal
 {
-    internal sealed class PDEventPublisher(IPDConnectionStore connectionStore, IEventHistoryStore eventHistoryStore,INotificationFactory notificationFactory, ActivitySource activitySource) : IEventPublisher
+    internal sealed class PDEventPublisher(IPDConnectionStore connectionStore, INotificationFactory notificationFactory) : IEventPublisher
     {
-        private readonly ActivitySource _activitySource = activitySource;
+        private static readonly ActivitySource _activitySource = new(InternalConstants.ActivitySourceName, InternalConstants.ActivityVersion);
         private readonly IPDConnectionStore _connectionStore = connectionStore;
-        private readonly IEventHistoryStore _eventHistoryStore = eventHistoryStore;
         private readonly INotificationFactory _notificationFactory = notificationFactory;
 
         public ValueTask PublishAsync<T>(T notification, string eventType = "message", CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(notification);
-            if (string.IsNullOrWhiteSpace(eventType))
-                throw new ArgumentException("Event type cannot be null or empty.", nameof(eventType));
+            string normalizedEventType = NotificationFactory.NormalizeEventType(eventType);
             cancellationToken.ThrowIfCancellationRequested();
 
-            var pdNotification = _notificationFactory.CreateNotification(notification, eventType, InternalConstants.DashboardSubscriberKey);
+            var pdNotification = _notificationFactory.CreateNotification(notification, normalizedEventType, InternalConstants.DashboardSubscriberKey);
 
             using Activity? activity = _activitySource.StartActivity("PingDrop.SendToDashboard", ActivityKind.Internal);
-            activity?.SetTag(InternalConstants.EventTypeTag, eventType);
+            activity?.SetTag(InternalConstants.EventTypeTag, normalizedEventType);
             activity?.SetTag(InternalConstants.EventIdTag, pdNotification.Id);
             activity?.SetTag(InternalConstants.EventPayloadSizeTag, pdNotification.Payload?.Length);
             activity?.SetTag(InternalConstants.ClientsCountTag, _connectionStore.CountByKey(InternalConstants.DashboardSubscriberKey));
 
             foreach (PDClientConnection client in _connectionStore.GetByKey(InternalConstants.DashboardSubscriberKey))
             {
-                if (client.IsSubscribedTo(eventType))
+                if (client.IsSubscribedTo(normalizedEventType))
                 {
                     try
                     {
