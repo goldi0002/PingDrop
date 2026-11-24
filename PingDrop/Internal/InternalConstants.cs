@@ -11,7 +11,7 @@
         public const string DefaultQueryEventTypeParam = "eventType";
         #endregion
 
-        public const string ActivitySourceName = "PingDrop";
+        public const string ActivitySourceName = PingDrop.Abstractions.PingDropTelemetry.ActivitySourceName;
         public const string ActivityVersion = "v1.1";
 
         #region Activity Tags

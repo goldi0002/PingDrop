@@ -20,6 +20,7 @@ public sealed class PingDropHost : IAsyncDisposable
 {
     private readonly WebApplication _app;
     public HttpClient Client { get; }
+    public IServiceProvider Services => _app.Services;
     public IPingDropService Service => _app.Services.GetRequiredService<IPingDropService>();
     public List<long> Connected { get; } = new();
     public List<long> Disconnected { get; } = new();
