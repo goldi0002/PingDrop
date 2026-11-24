@@ -107,9 +107,16 @@ public class LiveLogTests
         await using var host = await PingDropHost.StartAsync(o => o.Dashboard.LogEachDispatch = true);
         await using var dash = await ConnectDashboardAsync(host);
 
-        await RoundTripAsync(host);
+        // The dispatch line is published after the frame is written and uses the request's cancellation token, so the
+        // client must stay connected until the dashboard has seen it; disconnecting right after reading the event races it.
+        var alice = await host.ConnectAsync("alice");
+        await host.Service.BroadcastAsync("{}", "evt");
+        Assert.Equal("evt", (await alice.ReadEventAsync()).Event);
+        var msgs = await ReadLogMessagesAsync(dash, 2);
+        await alice.DisposeAsync();
+        await PingDropHost.WaitUntilAsync(() => { lock (host.Disconnected) return host.Disconnected.Count == 1; });
+        msgs.AddRange(await ReadLogMessagesAsync(dash, 1));
 
-        var msgs = await ReadLogMessagesAsync(dash, 3);
         Assert.StartsWith("Client connected", msgs[0]);
         Assert.StartsWith("Event dispatched", msgs[1]);
         Assert.StartsWith("Client disconnected", msgs[2]);
