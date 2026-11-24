@@ -1,4 +1,4 @@
-namespace PingDrop.Tests.Integration;
+﻿namespace PingDrop.Tests.Integration;
 
 public class SseEndpointTests
 {
@@ -166,5 +166,24 @@ public class SseEndpointTests
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
             await sse.ReadLineAsync().WaitAsync(cts.Token);
         });
+    }
+
+    [Fact]
+    public async Task SendToMany_IsReceivedByEveryListedUser()
+    {
+        await using var host = await PingDropHost.StartAsync();
+        await using var alice = await host.ConnectAsync("alice");
+        await using var bob = await host.ConnectAsync("bob");
+        await using var carol = await host.ConnectAsync("carol");
+
+        await host.Service.SendToAsync(new[] { "alice", "bob" }, "multi", "evt");
+        await host.Service.SendToAsync("carol", "solo", "evt");
+
+        var a = await alice.ReadEventAsync();
+        var b = await bob.ReadEventAsync();
+        Assert.Equal("\"multi\"", a.Data);
+        Assert.Equal("\"multi\"", b.Data);
+        Assert.Equal(a.Id, b.Id);
+        Assert.Equal("\"solo\"", (await carol.ReadEventAsync()).Data);
     }
 }

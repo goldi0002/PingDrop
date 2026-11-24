@@ -1,4 +1,5 @@
-﻿using PingDrop.Internal;
+﻿using PingDrop.Abstractions;
+using PingDrop.Internal;
 
 namespace PingDrop.Tests.Unit;
 
@@ -113,5 +114,96 @@ public class PingDropHubTests
         var (hub, _, _) = Create();
 
         await Assert.ThrowsAsync<ArgumentException>(async () => await hub.SendToAsync(" ", "x", "evt"));
+    }
+
+    // ---- SendTo (multiple keys) ----
+
+    [Fact]
+    public async Task SendToMany_ReachesAllConnectionsOfAllKeys_AsOneEvent()
+    {
+        var (hub, store, history) = Create();
+        var a1 = store.Add(null, "u1");
+        var a2 = store.Add(null, "u1");
+        var b = store.Add(null, "u2");
+        var other = store.Add(null, "u3");
+
+        await hub.SendToAsync(new[] { "u1", "u2" }, "hi", "evt");
+
+        Assert.Equal(1, a1.PendingNotifications);
+        Assert.Equal(1, a2.PendingNotifications);
+        Assert.Equal(1, b.PendingNotifications);
+        Assert.Equal(0, other.PendingNotifications);
+        Assert.Equal(1, hub.TotalEventsPublished);
+        Assert.Equal(3, hub.AttemptedDeliveries);
+        Assert.Equal(3, hub.SuccessfulDeliveries);
+        var e = Assert.Single(history.GetAll());
+        Assert.Equal("evt", e.EventType);
+        Assert.Equal("u1,u2", e.TargetKey);
+    }
+
+    [Fact]
+    public async Task SendToMany_DedupesKeysAndIgnoresBlank()
+    {
+        var (hub, store, _) = Create();
+        var a = store.Add(null, "u1");
+
+        await hub.SendToAsync(new[] { "u1", "u1", "", "  ", null! }, "hi", "evt");
+
+        Assert.Equal(1, a.PendingNotifications);
+        Assert.Equal(1, hub.AttemptedDeliveries);
+    }
+
+    [Fact]
+    public async Task SendToMany_RespectsEventTypeFilter()
+    {
+        var (hub, store, _) = Create();
+        var filtered = store.Add(new HashSet<string> { "other" }, "u1");
+        var matching = store.Add(new HashSet<string> { "evt" }, "u2");
+
+        await hub.SendToAsync(new[] { "u1", "u2" }, "hi", "evt");
+
+        Assert.Equal(0, filtered.PendingNotifications);
+        Assert.Equal(1, matching.PendingNotifications);
+        Assert.Equal(1, hub.AttemptedDeliveries);
+        Assert.Equal(1, hub.TotalEventsPublished);
+    }
+
+    [Fact]
+    public async Task SendToMany_UnknownKeys_IsNoOp()
+    {
+        var (hub, store, history) = Create();
+        store.Add(null, "u1");
+
+        await hub.SendToAsync(new[] { "nobody", "ghost" }, "hi", "evt");
+
+        Assert.Equal(0, hub.TotalEventsPublished);
+        Assert.Equal(0, history.Count);
+    }
+
+    [Fact]
+    public async Task SendToMany_InvalidArguments_Throw()
+    {
+        var (hub, _, _) = Create();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await hub.SendToAsync((IEnumerable<string>)null!, "x"));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await hub.SendToAsync(new[] { "u1" }, (string)null!));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await hub.SendToAsync(Array.Empty<string>(), "x"));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await hub.SendToAsync(new[] { " ", "" }, "x"));
+    }
+
+    [Fact]
+    public async Task SendTo_StringKeyStillBindsToSingleKeyOverload()
+    {
+        var (hub, store, history) = Create();
+        var a = store.Add(null, "u1");
+        var obj = new { X = 1 };
+
+        await hub.SendToAsync("u1", obj);
+        await hub.SendToAsync("u1", "payload", "evt");
+        IPingDropService svc = hub;
+        await svc.SendToAsync("u1", obj, "evt");
+
+        Assert.Equal(3, a.PendingNotifications);
+        Assert.All(history.GetAll(), e => Assert.Equal("u1", e.TargetKey));
     }
 }

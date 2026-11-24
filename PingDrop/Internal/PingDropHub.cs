@@ -81,6 +81,44 @@ namespace PingDrop.Internal
             return ValueTask.CompletedTask;
         }
 
+        public ValueTask SendToAsync<T>(IEnumerable<string> targetKeys, T notification, string eventType = "message", CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(targetKeys);
+            ArgumentNullException.ThrowIfNull(notification);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            List<string> keys = targetKeys.Where(k => !string.IsNullOrWhiteSpace(k)).Distinct(StringComparer.Ordinal).ToList();
+
+            if (keys.Count == 0)
+            {
+                throw new ArgumentException("At least one non-blank target key is required.", nameof(targetKeys));
+            }
+
+            List<PDClientConnection> clients = keys.SelectMany(_connectionStore.GetByKey).Distinct().ToList();
+
+            if (clients.Count == 0)
+            {
+                return ValueTask.CompletedTask;
+            }
+
+            string joinedKeys = string.Join(",", keys);
+            PDNotification pdNotification = _notificationFactory.CreateNotification(notification, eventType, joinedKeys);
+            Interlocked.Increment(ref _totalEventsPublished);
+            _eventHistoryStore.AddEvent(pdNotification);
+
+            using Activity? activity = _activitySource.StartActivity("PingDrop.SendTo", ActivityKind.Internal);
+
+            activity?.SetTag(InternalConstants.EventTypeTag, eventType);
+            activity?.SetTag(InternalConstants.EventIdTag, pdNotification.Id);
+            activity?.SetTag(InternalConstants.EventPayloadSizeTag, pdNotification.Payload?.Length);
+            activity?.SetTag(InternalConstants.SubscriberKeyTag, joinedKeys);
+            activity?.SetTag(InternalConstants.ClientsCountTag, clients.Count);
+
+            DeliverNotification(pdNotification, eventType, clients);
+
+            return ValueTask.CompletedTask;
+        }
+
         private void DeliverNotification(PDNotification notification, string eventType, IEnumerable<PDClientConnection> clients)
         {
             int attempted = 0;
