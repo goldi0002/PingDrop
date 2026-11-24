@@ -227,4 +227,30 @@ public class PingDropHubTests
         Assert.Contains("Dropped 2 of 2", warn.Message);
         Assert.Equal(4, hub.DroppedDeliveries);
     }
+
+    [Fact]
+    public async Task QueueOverflow_IsCountedInHubMetrics_AndWarnsOnce()
+    {
+        var logs = new LogCollector();
+        var store = new PDConnectionStore();
+        var hub = new PingDropHub(store, new PDEventHistoryStore(100), new NotificationFactory(), LoggerFactory.Create(b => b.AddProvider(logs)));
+        var slow = store.Add(null, "slow");
+        int sends = PDClientConnection.QueueCapacity + 5;
+
+        for (int i = 0; i < sends; i++)
+            await hub.BroadcastAsync(i, "evt");
+
+        Assert.Equal(5, slow.NotificationsDropped);
+        Assert.Equal(PDClientConnection.QueueCapacity, slow.PendingNotifications);
+
+        var m = hub.GetMetrics();
+        Assert.Equal(sends, m.AttemptedDeliveries);
+        Assert.Equal(5, m.DroppedDeliveries);
+        Assert.Equal(PDClientConnection.QueueCapacity, m.SuccessfulDeliveries);
+        Assert.Equal(m.AttemptedDeliveries, m.SuccessfulDeliveries + m.DroppedDeliveries);
+        Assert.Equal(5, hub.DroppedDeliveries);
+
+        var warn = Assert.Single(logs.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("Dropped 1 of 1", warn.Message);
+    }
 }
