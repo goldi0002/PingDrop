@@ -21,9 +21,9 @@ Use PingDrop for transient notifications, and keep the source of truth in your d
 
 ## Per-client queue
 
-Each connection has its own bounded queue of **20** notifications with a **drop-oldest** policy. If a client reads slowly (slow network, throttled background tab) and more than 20 events pile up, the oldest unsent events are discarded to make room for new ones. The size and policy are not configurable.
+Each connection has its own bounded queue, **20** notifications by default with a **drop-oldest** policy. If a client reads slowly (slow network, throttled background tab) and the queue fills, the oldest unsent events are discarded to make room for new ones. Both are configurable: `ClientQueueCapacity` sets the size, and `ClientQueueFullMode` chooses `DropOldest`, `DropNewest` or `DisconnectClient` (end the stream so the client reconnects). See [Configuration](configuration.md#clientqueuecapacity--clientqueuefullmode).
 
-Delivery order within one client is preserved for the events that remain. Overflow is silent: the dashboard's "Dropped Deliveries" counter does not currently include events discarded this way, only writes that failed or were cancelled.
+Delivery order within one client is preserved for the events that remain. Events discarded by overflow are counted in the dashboard's "Dropped Deliveries" metric. Nothing replays them, so a client that was dropped from or disconnected will not receive the lost events (see "No replay" above).
 
 ## Event history
 

@@ -1,4 +1,5 @@
-﻿using PingDrop.Models;
+﻿using PingDrop.Abstractions;
+using PingDrop.Models;
 using System.Threading.Channels;
 
 namespace PingDrop.Internal
@@ -6,7 +7,12 @@ namespace PingDrop.Internal
     internal sealed class PDClientConnection : IAsyncDisposable
     {
         private readonly HashSet<string>? _subscribedEventTypes;
+        private readonly PingDropQueueFullMode _fullMode;
         private int _disposed;
+
+        // itemDropped runs synchronously on the writing thread, so a write can tell how many items it displaced.
+        [ThreadStatic]
+        private static int _droppedByCurrentWrite;
 
         private long _notificationsSent;
         private long _notificationsDropped;
@@ -14,11 +20,7 @@ namespace PingDrop.Internal
         private static long _nextConnectionId;
 
         /// <summary>Maximum number of undelivered notifications queued per client before the oldest is dropped.</summary>
-        internal const int QueueCapacity = 20;
-
-        // The itemDropped callback runs synchronously on the writing thread, so a thread-static tally lets a write report its own overflow.
-        [ThreadStatic]
-        private static int _overflowOnCurrentWrite;
+        internal const int QueueCapacity = PingDropOptions.DefaultClientQueueCapacity;
 
         public long ConnectionId { get; } = Interlocked.Increment(ref _nextConnectionId);
 
@@ -53,8 +55,11 @@ namespace PingDrop.Internal
         {
         }
 
-        public PDClientConnection(HashSet<string>? eventTypes, string? subscriberKey = null)
+        public PDClientConnection(HashSet<string>? eventTypes, string? subscriberKey = null,
+            int queueCapacity = PingDropOptions.DefaultClientQueueCapacity,
+            PingDropQueueFullMode fullMode = PingDropQueueFullMode.DropOldest)
         {
+            _fullMode = fullMode;
             _subscribedEventTypes = eventTypes;
 
             SubscriberKey = subscriberKey;
@@ -62,12 +67,22 @@ namespace PingDrop.Internal
             ConnectedAtUtc = DateTime.UtcNow;
             _lastActivityAtUtc = ConnectedAtUtc;
 
-            NotificationChannel = Channel.CreateBounded<PDNotification>(new BoundedChannelOptions(QueueCapacity)
+            NotificationChannel = Channel.CreateBounded<PDNotification>(new BoundedChannelOptions(queueCapacity)
             {
                 SingleReader = true,
                 SingleWriter = false,
-                FullMode = BoundedChannelFullMode.DropOldest
-            }, OnItemDropped);
+                // DisconnectClient needs TryWrite to fail when full, which is what Wait does.
+                FullMode = fullMode switch
+                {
+                    PingDropQueueFullMode.DropOldest => BoundedChannelFullMode.DropOldest,
+                    PingDropQueueFullMode.DropNewest => BoundedChannelFullMode.DropWrite,
+                    _ => BoundedChannelFullMode.Wait
+                }
+            }, _ =>
+            {
+                _droppedByCurrentWrite++;
+                Interlocked.Increment(ref _notificationsDropped);
+            });
         }
 
         public async Task WriteNotificationAsync(PDNotification notification, CancellationToken cancellationToken = default)
@@ -79,43 +94,53 @@ namespace PingDrop.Internal
             Touch();
         }
 
-        // With DropOldest, TryWrite always succeeds, so overflow is only observable through this callback.
-        private void OnItemDropped(PDNotification _)
-        {
-            Interlocked.Increment(ref _notificationsDropped);
-            _overflowOnCurrentWrite++;
-        }
-
         public bool TryWriteNotification(PDNotification notification)
         {
             return TryWriteNotification(notification, out _);
         }
 
-        /// <summary>Queues a notification; <paramref name="overflowDropped"/> is the number of older queued notifications evicted to make room.</summary>
-        public bool TryWriteNotification(PDNotification notification, out int overflowDropped)
+        /// <summary>
+        /// Queues a notification. Returns true when it was queued. <paramref name="dropped"/> is the number of
+        /// notifications lost by this call: the displaced oldest one, the rejected new one, or the rejected one that
+        /// ended the connection.
+        /// </summary>
+        public bool TryWriteNotification(PDNotification notification, out int dropped)
         {
-            overflowDropped = 0;
+            dropped = 0;
 
             if (IsDisposed)
+            {
+                Interlocked.Increment(ref _notificationsDropped);
+                dropped = 1;
+                return false;
+            }
+
+            _droppedByCurrentWrite = 0;
+            bool written = NotificationChannel.Writer.TryWrite(notification);
+            dropped = _droppedByCurrentWrite;
+
+            if (!written)
+            {
+                // Wait mode refuses a full queue (DisconnectClient ends the stream); a completed channel refuses too.
+                Interlocked.Increment(ref _notificationsDropped);
+                dropped = 1;
+
+                if (_fullMode == PingDropQueueFullMode.DisconnectClient)
+                {
+                    _ = DisposeAsync();
+                }
+
+                return false;
+            }
+
+            // DropWrite reports success even though it discarded this very notification.
+            if (_fullMode == PingDropQueueFullMode.DropNewest && dropped > 0)
             {
                 return false;
             }
 
-            _overflowOnCurrentWrite = 0;
-            bool written = NotificationChannel.Writer.TryWrite(notification);
-            overflowDropped = _overflowOnCurrentWrite;
-            _overflowOnCurrentWrite = 0;
-
-            if (written)
-            {
-                Touch();
-            }
-            else
-            {
-                Interlocked.Increment(ref _notificationsDropped);
-            }
-
-            return written;
+            Touch();
+            return true;
         }
 
         /// <summary>Records connection activity (e.g. a heartbeat) without counting a delivered notification.</summary>

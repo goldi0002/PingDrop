@@ -1,3 +1,4 @@
+using PingDrop.Abstractions;
 using PingDrop.Internal;
 using PingDrop.Models;
 
@@ -77,5 +78,82 @@ public class PDClientConnectionTests
         Assert.True(c.IsDisposed);
         Assert.False(c.TryWriteNotification(N(1)));
         Assert.True(c.NotificationChannel.Reader.Completion.IsCompleted);
+    }
+
+    [Fact]
+    public void Defaults_AreCapacity20_DropOldest()
+    {
+        var options = new PingDropOptions();
+        Assert.Equal(20, options.ClientQueueCapacity);
+        Assert.Equal(PingDropQueueFullMode.DropOldest, options.ClientQueueFullMode);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void ClientQueueCapacity_BelowOne_Throws(int value)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PingDropOptions().ClientQueueCapacity = value);
+    }
+
+    [Fact]
+    public void DropOldest_CountsDisplacedNotifications()
+    {
+        var c = new PDClientConnection(null, null, 3, PingDropQueueFullMode.DropOldest);
+
+        for (long i = 1; i <= 5; i++)
+            Assert.True(c.TryWriteNotification(N(i), out int dropped) && (dropped == (i > 3 ? 1 : 0)));
+
+        Assert.Equal(2, c.NotificationsDropped);
+        Assert.Equal(3, c.PendingNotifications);
+        Assert.True(c.NotificationChannel.Reader.TryRead(out var first));
+        Assert.Equal(3, first!.Id);
+        Assert.False(c.IsDisposed);
+    }
+
+    [Fact]
+    public void DropNewest_KeepsQueued_AndCountsRejected()
+    {
+        var c = new PDClientConnection(null, null, 3, PingDropQueueFullMode.DropNewest);
+
+        for (long i = 1; i <= 3; i++)
+            Assert.True(c.TryWriteNotification(N(i)));
+        Assert.False(c.TryWriteNotification(N(4), out int dropped));
+        Assert.False(c.TryWriteNotification(N(5)));
+
+        Assert.Equal(1, dropped);
+        Assert.Equal(2, c.NotificationsDropped);
+        Assert.Equal(3, c.PendingNotifications);
+        Assert.True(c.NotificationChannel.Reader.TryRead(out var first));
+        Assert.Equal(1, first!.Id);
+        Assert.False(c.IsDisposed);
+    }
+
+    [Fact]
+    public void DisconnectClient_CompletesConnection_WhenFull()
+    {
+        var c = new PDClientConnection(null, null, 2, PingDropQueueFullMode.DisconnectClient);
+
+        Assert.True(c.TryWriteNotification(N(1)));
+        Assert.True(c.TryWriteNotification(N(2)));
+        Assert.False(c.TryWriteNotification(N(3)));
+
+        Assert.True(c.IsDisposed);
+        Assert.Equal(1, c.NotificationsDropped);
+        // Queued items are still readable, then the channel completes.
+        Assert.True(c.NotificationChannel.Reader.TryRead(out _));
+        Assert.True(c.NotificationChannel.Reader.TryRead(out _));
+        Assert.True(c.NotificationChannel.Reader.Completion.IsCompleted);
+    }
+
+    [Fact]
+    public void Store_AppliesOptionsToNewConnections()
+    {
+        var store = new PDConnectionStore(2, PingDropQueueFullMode.DropNewest);
+        var c = store.Add(null, "k");
+
+        Assert.True(c.TryWriteNotification(N(1)));
+        Assert.True(c.TryWriteNotification(N(2)));
+        Assert.False(c.TryWriteNotification(N(3)));
     }
 }

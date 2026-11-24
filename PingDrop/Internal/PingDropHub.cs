@@ -145,20 +145,21 @@ namespace PingDrop.Internal
 
                 attempted++;
 
-                if (client.TryWriteNotification(notification, out int overflow))
+                if (client.TryWriteNotification(notification, out int clientDropped))
                 {
                     successful++;
 
                     // An evicted older notification was counted successful when queued; reclassify it so successful + dropped == attempted.
-                    if (overflow > 0)
+                    if (clientDropped > 0)
                     {
-                        successful -= overflow;
-                        dropped += overflow;
+                        successful -= clientDropped;
+                        dropped += clientDropped;
                     }
                 }
                 else
                 {
-                    dropped++;
+                    // Rejected outright (disposed, DropNewest, or a full queue under DisconnectClient).
+                    dropped += clientDropped;
                 }
             }
 

@@ -5,8 +5,17 @@ namespace PingDrop.Internal
 {
     internal sealed class PDConnectionStore : IPDConnectionStore
     {
+        private readonly int _queueCapacity;
+        private readonly PingDropQueueFullMode _queueFullMode;
         private readonly ConcurrentDictionary<long, PDClientConnection> _all = new();
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<long, PDClientConnection>> _byKey = new();
+
+        public PDConnectionStore(int queueCapacity = PingDropOptions.DefaultClientQueueCapacity, PingDropQueueFullMode queueFullMode = PingDropQueueFullMode.DropOldest)
+        {
+            _queueCapacity = queueCapacity;
+            _queueFullMode = queueFullMode;
+        }
+
         // Dashboard feed connections are internal and excluded from Count and GetAll; reach them via GetByKey.
         public int Count => _all.Values.Count(c => !c.IsDashboard);
         public int CountByKey(string subscriberKey)
@@ -22,9 +31,7 @@ namespace PingDrop.Internal
             if (string.IsNullOrWhiteSpace(subscriberKey))
                 subscriberKey = null;
 
-            var client = subscriberKey is null
-            ? new PDClientConnection(eventTypes)
-            : new PDClientConnection(eventTypes, subscriberKey);
+            var client = new PDClientConnection(eventTypes, subscriberKey, _queueCapacity, _queueFullMode);
 
             _all[client.ConnectionId] = client;
 
