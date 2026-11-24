@@ -33,7 +33,7 @@ namespace PingDrop.Extensions
 
             services.AddSingleton(options);
             services.AddSingleton<INotificationFactory, NotificationFactory>();
-            services.AddSingleton<IPDConnectionStore, PDConnectionStore>();
+            services.AddSingleton<IPDConnectionStore>(sp => new PDConnectionStore(options.ClientQueueCapacity, options.ClientQueueFullMode));
             services.AddSingleton<IEventHistoryStore, PDEventHistoryStore>(sp => new PDEventHistoryStore(options.EventHistorySize));
             services.AddSingleton<PingDropHub>();
             services.AddSingleton<IPingDropService>(sp => sp.GetRequiredService<PingDropHub>());

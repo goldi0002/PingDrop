@@ -47,6 +47,34 @@ namespace PingDrop.Abstractions
         /// </summary>
         public int EventHistorySize { get; set; } = 50;
 
+        internal const int DefaultClientQueueCapacity = 20;
+
+        private int _clientQueueCapacity = DefaultClientQueueCapacity;
+
+        /// <summary>
+        /// Gets or sets the maximum number of notifications queued per connected client while they wait to be written
+        /// to that client's stream. Defaults to 20.
+        /// </summary>
+        /// <remarks>What happens when a client's queue is full is controlled by <see cref="ClientQueueFullMode"/>.
+        /// Every connection gets its own queue, so memory use grows with capacity times the number of clients.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int ClientQueueCapacity
+        {
+            get => _clientQueueCapacity;
+            set
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+                _clientQueueCapacity = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets what happens when a notification is sent to a client whose queue (see
+        /// <see cref="ClientQueueCapacity"/>) is full. Defaults to <see cref="PingDropQueueFullMode.DropOldest"/>.
+        /// </summary>
+        /// <remarks>Every notification lost this way is counted in the dropped-deliveries metric.</remarks>
+        public PingDropQueueFullMode ClientQueueFullMode { get; set; } = PingDropQueueFullMode.DropOldest;
+
         /// <summary>
         /// Gets or sets a value indicating whether the dashboard is enabled.
         /// </summary>
@@ -80,6 +108,24 @@ namespace PingDrop.Abstractions
         /// typically used to identify a unique subscriber in scenarios such as caching or request tracking.</remarks>
         public Func<HttpContext, string?>? TargetKeyResolver { get; set; }
     }
+    /// <summary>
+    /// Describes what happens when a notification arrives for a client whose queue is full.
+    /// </summary>
+    public enum PingDropQueueFullMode
+    {
+        /// <summary>The oldest queued notification is discarded to make room for the new one.</summary>
+        DropOldest,
+
+        /// <summary>The new notification is discarded and the queued ones are kept.</summary>
+        DropNewest,
+
+        /// <summary>
+        /// The client's stream is ended (the new notification is discarded). The client is removed and, being a
+        /// well-behaved <c>EventSource</c>, reconnects and starts with an empty queue.
+        /// </summary>
+        DisconnectClient
+    }
+
     /// <summary>
     /// Dashboard configuration options.
     /// </summary>

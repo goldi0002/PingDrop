@@ -140,14 +140,12 @@ namespace PingDrop.Internal
 
                 attempted++;
 
-                if (client.TryWriteNotification(notification))
+                if (client.TryWriteNotification(notification, out int clientDropped))
                 {
                     successful++;
                 }
-                else
-                {
-                    dropped++;
-                }
+
+                dropped += clientDropped;
             }
 
             if (attempted > 0)

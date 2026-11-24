@@ -21,6 +21,8 @@ The delegate runs once, when `AddPingDrop` is called. Options are read from the 
 | `HeartbeatInterval` | `TimeSpan` | 15 seconds | How often a `: ping` comment is written to an idle connection, so proxies and load balancers do not close it and dead peers are noticed. Zero or negative disables heartbeats. |
 | `ClientRetryInterval` | `TimeSpan` | 3 seconds | Reconnect delay suggested to clients with an SSE `retry:` field, sent once when a stream opens. Zero or negative omits the hint (the client uses its own default). |
 | `EventHistorySize` | `int` | `50` | Number of recent events kept in memory. Used by the dashboard only; it is not replayed to clients. |
+| `ClientQueueCapacity` | `int` | `20` | Maximum notifications queued per connected client. Must be at least 1; smaller values throw `ArgumentOutOfRangeException`. |
+| `ClientQueueFullMode` | `PingDropQueueFullMode` | `DropOldest` | What happens when a client's queue is full: `DropOldest`, `DropNewest` or `DisconnectClient`. |
 | `EnableDashboard` | `bool` | `true` | Whether to map the dashboard. See [Dashboard](dashboard.md) for the Development-only default. |
 | `Dashboard` | `PingDropDashboardOptions` | new instance | Dashboard options, below. |
 | `ClientConnected` | `Func<long, Task>?` | `null` | Called after a client connects, with its connection id. Exceptions thrown by the callback are swallowed. |
@@ -42,6 +44,16 @@ Sent as `retry: <milliseconds>` at the start of every stream. Browsers use it as
 ### `EventHistorySize`
 
 A fixed-size ring buffer. Values below 1 are treated as 1. An event is recorded only when at least one connection exists to consider it: a broadcast with no connections, or a `SendToAsync` for a key nobody holds, is not recorded.
+
+### `ClientQueueCapacity` / `ClientQueueFullMode`
+
+Every connection has its own bounded queue between `BroadcastAsync`/`SendToAsync` and the network write. A client that reads slowly lets it fill up. The mode decides what gives:
+
+- `DropOldest` (default): the oldest queued event is discarded to make room, so the client ends up with the most recent events.
+- `DropNewest`: the new event is discarded and the queued ones are kept, so the client sees events in order without gaps until it catches up.
+- `DisconnectClient`: the client's stream is ended. `ClientDisconnected` fires and the connection is removed; `EventSource` then reconnects on its own with an empty queue. Use this when a client that missed events is better off resyncing from your API than silently skipping some.
+
+Every event lost this way (including the one that triggers a disconnect) counts toward the "Dropped Deliveries" metric and the aggregated drop warning in the log. The queue holds events not yet written to the client; an event already being written when the stream ends is not counted as dropped.
 
 ### `TargetKeyResolver`
 
@@ -86,4 +98,4 @@ builder.Services.AddPingDrop(o =>
 
 ## Not configurable
 
-These are fixed in the current version: the per-client queue size (20 events, oldest dropped when full), the query parameter used for event filtering (`eventType`), and the SSE event id scheme. See [Limitations](limitations.md).
+These are fixed in the current version: the query parameter used for event filtering (`eventType`), and the SSE event id scheme. See [Limitations](limitations.md).

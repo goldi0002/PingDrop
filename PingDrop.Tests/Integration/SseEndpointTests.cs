@@ -186,4 +186,28 @@ public class SseEndpointTests
         Assert.Equal(a.Id, b.Id);
         Assert.Equal("\"solo\"", (await carol.ReadEventAsync()).Data);
     }
+
+    [Fact]
+    public async Task DisconnectClient_WhenQueueFull_EndsStream_AndFiresClientDisconnected()
+    {
+        await using var host = await PingDropHost.StartAsync(o =>
+        {
+            o.ClientQueueCapacity = 2;
+            o.ClientQueueFullMode = PingDrop.Abstractions.PingDropQueueFullMode.DisconnectClient;
+        });
+        await using var sse = await host.ConnectAsync("slow");
+
+        // The client never reads, so large events back up in the response pipe and then in the queue.
+        var payload = new string('x', 256 * 1024);
+        for (int i = 0; i < 50; i++)
+            await host.Service.BroadcastAsync(new { payload }, "big");
+
+        // Draining the stream reaches its end: the server completed it once the queue overflowed.
+        await Assert.ThrowsAsync<EndOfStreamException>(async () =>
+        {
+            while (true) await sse.ReadLineAsync();
+        });
+
+        await PingDropHost.WaitUntilAsync(() => { lock (host.Disconnected) return host.Disconnected.Count == 1; });
+    }
 }
