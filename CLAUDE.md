@@ -24,9 +24,7 @@ dotnet test PingDrop.Tests --filter "FullyQualifiedName~PingDropHubTests"   # on
 
 In a fresh cloud container the SDK may be missing. `apt-get update && apt-get install -y dotnet-sdk-8.0` works, but dot.net and builds.dotnet.microsoft.com are blocked by the proxy.
 
-`GeneratePackageOnBuild` is true, so every build of the library also produces a `.nupkg`. `GenerateDocumentationFile` is also on, so XML doc comments are expected on public members.
-
-`PingDrop.csproj` packs `icon.png` and `README.md` from the `PingDrop/` folder, and neither is tracked there. If a build or pack complains about them, that is the cause.
+`GeneratePackageOnBuild` is off, so pack explicitly. `GenerateDocumentationFile` is on, so XML doc comments are expected on public members. SourceLink and a `.snupkg` symbol package are produced by `dotnet pack`.
 
 ## Architecture
 
