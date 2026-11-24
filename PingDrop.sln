@@ -11,6 +11,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{900245BE
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PingDrop.Web.Test", "PingDrop.Web.Test\PingDrop.Web.Test.csproj", "{FFC6040A-C8AE-4847-AE43-34E66F870446}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PingDrop.Tests", "PingDrop.Tests\PingDrop.Tests.csproj", "{F3A03639-3AA8-4543-B2AC-870F26117313}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -25,6 +27,10 @@ Global
 		{FFC6040A-C8AE-4847-AE43-34E66F870446}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FFC6040A-C8AE-4847-AE43-34E66F870446}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FFC6040A-C8AE-4847-AE43-34E66F870446}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F3A03639-3AA8-4543-B2AC-870F26117313}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F3A03639-3AA8-4543-B2AC-870F26117313}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F3A03639-3AA8-4543-B2AC-870F26117313}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F3A03639-3AA8-4543-B2AC-870F26117313}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

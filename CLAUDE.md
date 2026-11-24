@@ -10,17 +10,19 @@ The solution (`PingDrop.sln`) has two projects:
 - `PingDrop/` is the library, a class library with `FrameworkReference Microsoft.AspNetCore.App`.
 - `PingDrop.Web.Test/` is a Razor Pages host app that references the library. It is a manual test harness, not an automated test suite.
 
-There are no automated tests, no linter config and no CI in the repo.
+`PingDrop.Tests/` is an xUnit project: `Unit/` covers internals (exposed via `InternalsVisibleTo`), and `Integration/` runs the real endpoints on `TestServer` through the `PingDropHost` helper. There is no linter config and no CI in the repo.
 
 ## Commands
-
-The `dotnet` SDK was not installed in the cloud container when this file was written, so these commands are untested there.
 
 ```
 dotnet build PingDrop.sln
 dotnet run --project PingDrop.Web.Test      # launch profiles are in Properties/launchSettings.json
 dotnet pack PingDrop/PingDrop.csproj
+dotnet test PingDrop.Tests
+dotnet test PingDrop.Tests --filter "FullyQualifiedName~PingDropHubTests"   # one class; use ~Name.Method for one test
 ```
+
+In a fresh cloud container the SDK may be missing. `apt-get update && apt-get install -y dotnet-sdk-8.0` works, but dot.net and builds.dotnet.microsoft.com are blocked by the proxy.
 
 `GeneratePackageOnBuild` is true, so every build of the library also produces a `.nupkg`. `GenerateDocumentationFile` is also on, so XML doc comments are expected on public members.
 
