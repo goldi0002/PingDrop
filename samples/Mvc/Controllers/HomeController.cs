@@ -21,8 +21,12 @@ public class HomeController(IPingDropService pingDrop) : Controller
             new { Title = "Order shipped", Message = $"Order #{id} is on its way." },
             "notification");
 
-        return RedirectToAction(nameof(Index));
+        return Done();
     }
+
+    // The page posts with fetch (no reload, so the SSE connection stays open); plain form posts still redirect.
+    private IActionResult Done() =>
+        Request.Headers["X-Requested-With"] == "fetch" ? NoContent() : RedirectToAction(nameof(Index));
 
     // POST /Home/Announce : broadcast to everyone, whoever they are.
     [Authorize, HttpPost]
@@ -32,6 +36,6 @@ public class HomeController(IPingDropService pingDrop) : Controller
             new { Title = "Announcement", Message = $"Sent by {User.Identity?.Name}" },
             "notification");
 
-        return RedirectToAction(nameof(Index));
+        return Done();
     }
 }

@@ -29,6 +29,13 @@
         // No userId parameter: the server derives the key from the auth cookie.
         const client = new PingDropClient({ url: "/pingdrop/stream", withCredentials: true });
 
+        // Post the forms with fetch so the page is not reloaded: a reload would drop the SSE
+        // connection and the sender could miss the very event it just triggered.
+        document.querySelectorAll("form").forEach(f => f.addEventListener("submit", e => {
+          e.preventDefault();
+          fetch(f.action, { method: "POST", headers: { "X-Requested-With": "fetch" } });
+        }));
+
         client.on("notification", d => {
           const el = document.createElement("div");
           el.className = "toast";
