@@ -1,6 +1,34 @@
 # JavaScript client
 
-PingDrop has no client library. The stream is standard Server-Sent Events, so the browser's built-in [`EventSource`](https://developer.mozilla.org/docs/Web/API/EventSource) is the client.
+The stream is standard Server-Sent Events, so the browser's built-in [`EventSource`](https://developer.mozilla.org/docs/Web/API/EventSource) works as-is. PingDrop also ships an optional, dependency-free wrapper that adds typed handlers, event filtering and reconnect with backoff (see below).
+
+## The bundled client
+
+The library serves a small client script at `<EndpointPath>/client.js` (default `/pingdrop/stream/client.js`, `Content-Type: text/javascript; charset=utf-8`, `Cache-Control: public, max-age=3600`). The same file lives in the repository at [`clients/js`](../clients/js) (with typings, tests and an npm `package.json`, `pingdrop-client`). Set `PingDropOptions.ServeJavaScriptClient = false` to stop serving it.
+
+```html
+<script src="/pingdrop/stream/client.js"></script>
+<script>
+  const client = new PingDropClient({
+    url: "/pingdrop/stream",
+    eventTypes: ["notification", "alert"],   // server-side filter, sent as ?eventType=notification,alert
+    params: { uId: "42" },                    // extra query parameters (e.g. your TargetKeyResolver key)
+    withCredentials: true,
+    reconnect: { initialDelayMs: 1000, maxDelayMs: 30000, factor: 2, jitter: 0.5 },
+  });
+
+  client.on("notification", (data, evt) => showToast(data.Text));  // data is JSON.parse'd, or the raw string
+  client.on("open", refreshStateFromApi);
+  client.on("error", () => console.warn(client.state));
+  client.on("close", () => {});
+  client.off("notification");
+  client.close();
+</script>
+```
+
+Behaviour: while the browser is retrying natively the client only reports `error`; when the browser gives up (readyState `CLOSED`: 401, 403, 204, wrong content type) the client creates a new `EventSource` after an exponentially growing, jittered delay, resetting on `open`. `close()` stops everything. It does not replay missed events (see below). Full reference: [`clients/js/README.md`](../clients/js/README.md).
+
+The rest of this page describes the plain `EventSource` behaviour the client builds on.
 
 ## Basic usage
 

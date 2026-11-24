@@ -53,6 +53,12 @@ namespace PingDrop.Abstractions
         public bool EnableDashboard { get; set; } = true;
 
         /// <summary>
+        /// Gets or sets a value indicating whether the bundled JavaScript client is served at
+        /// <c>{EndpointPath}/client.js</c>. Defaults to <see langword="true"/>.
+        /// </summary>
+        public bool ServeJavaScriptClient { get; set; } = true;
+
+        /// <summary>
         /// Gets the configuration options for the Ping Drop Dashboard.
         /// </summary>
         public PingDropDashboardOptions Dashboard { get; set; } = new PingDropDashboardOptions();

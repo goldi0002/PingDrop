@@ -54,6 +54,11 @@ namespace PingDrop.Extensions
                 stream.RequireAuthorization(options.AuthorizationPolicy);
             }
 
+            if (options.ServeJavaScriptClient)
+            {
+                MapJavaScriptClient(endpoints, options.EndpointPath ?? InternalConstants.DefaultEndpointPath);
+            }
+
             if (options.EnableDashboard)
             {
                 bool secured = !string.IsNullOrWhiteSpace(options.Dashboard.AuthorizationPolicy);
@@ -457,6 +462,26 @@ namespace PingDrop.Extensions
             });
 
             return endpoints;
+        }
+
+        private static void MapJavaScriptClient(IEndpointRouteBuilder endpoints, string streamPath)
+        {
+            byte[]? script = null;
+            endpoints.MapGet(streamPath.TrimEnd('/') + "/client.js", async context =>
+            {
+                if (script is null)
+                {
+                    using Stream stream = typeof(EndpointRouteBuilderExtensions).Assembly
+                        .GetManifestResourceStream("PingDrop.Client.pingdrop.js")!;
+                    using MemoryStream ms = new();
+                    await stream.CopyToAsync(ms);
+                    script = ms.ToArray();
+                }
+
+                context.Response.ContentType = "text/javascript; charset=utf-8";
+                context.Response.Headers.CacheControl = "public, max-age=3600";
+                await context.Response.Body.WriteAsync(script, context.RequestAborted);
+            });
         }
     }
 }
