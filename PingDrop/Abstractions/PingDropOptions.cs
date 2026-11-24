@@ -17,14 +17,170 @@ namespace PingDrop.Abstractions
         /// </summary>
         public string EndpointPath { get; set; } = "/pingdrop/stream";
         /// <summary>
+        /// Gets or sets the name of an authorization policy required to connect to the SSE endpoint.
+        /// When <see langword="null"/> the endpoint is anonymous.
+        /// </summary>
+        /// <remarks>The application must call <c>AddAuthorization</c> (defining the policy) and
+        /// <c>UseAuthentication</c>/<c>UseAuthorization</c> before <c>MapPingDrop</c>. Prefer deriving the subscriber key
+        /// from authenticated claims in <see cref="TargetKeyResolver"/> rather than from the query string, otherwise any
+        /// client can subscribe as any user.</remarks>
+        public string? AuthorizationPolicy { get; set; }
+
+        /// <summary>
+        /// Gets or sets the name of a CORS policy (registered by the application with <c>AddCors</c>) applied to the SSE
+        /// endpoint and the bundled <c>client.js</c> route, so pages on other origins can use <c>EventSource</c>.
+        /// When <see langword="null"/> (and <see cref="AllowedOrigins"/> is empty) no CORS metadata is added.
+        /// </summary>
+        /// <remarks>The application must call <c>UseCors()</c> after <c>UseRouting</c> and before
+        /// <c>UseAuthentication</c>/<c>UseAuthorization</c> and <c>MapPingDrop</c>. The policy must allow the
+        /// <c>Last-Event-ID</c> request header, which the browser adds when it reconnects (a non-simple header, so it triggers a
+        /// preflight). With <c>withCredentials</c> the policy must also call <c>AllowCredentials()</c> and name explicit origins.
+        /// The dashboard routes never receive this policy. Cannot be combined with <see cref="AllowedOrigins"/>.</remarks>
+        public string? CorsPolicy { get; set; }
+
+        /// <summary>
+        /// Gets or sets exact origins (for example <c>https://app.example.com</c>) that may use the SSE endpoint and
+        /// <c>client.js</c> cross-origin. A convenience that registers a ready-made CORS policy: <c>GET</c> only, the
+        /// <c>Last-Event-ID</c> header, and credentials allowed (the matching origin is echoed, never <c>*</c>).
+        /// </summary>
+        /// <remarks>The application must still call <c>UseCors()</c> (see <see cref="CorsPolicy"/> for the order).
+        /// Wildcards are rejected. For anything else, register your own policy and set <see cref="CorsPolicy"/>.</remarks>
+        public string[]? AllowedOrigins { get; set; }
+
+        internal const string BuiltInCorsPolicyName = "PingDrop";
+
+        internal string? EffectiveCorsPolicy => !string.IsNullOrWhiteSpace(CorsPolicy) ? CorsPolicy
+            : AllowedOrigins is { Length: > 0 } ? BuiltInCorsPolicyName : null;
+
+        /// <summary>
+        /// Gets or sets how often a <c>: ping</c> comment is written to idle SSE connections so that proxies and load
+        /// balancers do not close them and dead peers are detected. Defaults to 15 seconds.
+        /// </summary>
+        /// <remarks>Set to <see cref="TimeSpan.Zero"/> or a negative value to disable heartbeats. Heartbeats are SSE
+        /// comments, so clients ignore them, and they are not counted as delivered notifications.</remarks>
+        public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+        /// <summary>
+        /// Gets or sets the reconnection delay suggested to clients through the SSE <c>retry:</c> field, sent once when
+        /// a stream opens. Defaults to 3 seconds.
+        /// </summary>
+        /// <remarks>Set to <see cref="TimeSpan.Zero"/> or a negative value to omit the hint, in which case the client
+        /// uses its own default.</remarks>
+        public TimeSpan ClientRetryInterval { get; set; } = TimeSpan.FromSeconds(3);
+
+        /// <summary>
+        /// When true (the default), a client that reconnects with a <c>Last-Event-ID</c> header (or a <c>lastEventId</c> query
+        /// parameter) is sent the retained events it missed before live events resume.
+        /// </summary>
+        /// <remarks>Best effort: replay is limited to the last <see cref="EventHistorySize"/> events, held in memory, and event
+        /// ids restart at 1 on every process start (a <c>Last-Event-ID</c> newer than any id issued replays nothing). While
+        /// enabled, events are also recorded when no matching client is connected, so a client that was the only
+        /// listener can catch up. The dashboard feed is never replayed.</remarks>
+        public bool EnableReplay { get; set; } = true;
+
+        /// <summary>
         /// Gets or sets the maximum number of events to retain in the event history.
         /// </summary>
         public int EventHistorySize { get; set; } = 50;
+
+        internal const int DefaultClientQueueCapacity = 20;
+
+        private int _clientQueueCapacity = DefaultClientQueueCapacity;
+
+        /// <summary>
+        /// Gets or sets the maximum number of notifications queued per connected client while they wait to be written
+        /// to that client's stream. Defaults to 20.
+        /// </summary>
+        /// <remarks>What happens when a client's queue is full is controlled by <see cref="ClientQueueFullMode"/>.
+        /// Every connection gets its own queue, so memory use grows with capacity times the number of clients.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int ClientQueueCapacity
+        {
+            get => _clientQueueCapacity;
+            set
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+                _clientQueueCapacity = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets what happens when a notification is sent to a client whose queue (see
+        /// <see cref="ClientQueueCapacity"/>) is full. Defaults to <see cref="PingDropQueueFullMode.DropOldest"/>.
+        /// </summary>
+        /// <remarks>Every notification lost this way is counted in the dropped-deliveries metric.</remarks>
+        public PingDropQueueFullMode ClientQueueFullMode { get; set; } = PingDropQueueFullMode.DropOldest;
+
+        private int? _maxConnectionsPerKey;
+        private int? _maxTotalConnections;
+        private int? _maxPayloadBytes;
+
+        /// <summary>
+        /// Gets or sets the maximum number of simultaneous connections that may share one subscriber key. <see langword="null"/>
+        /// (the default) means unlimited.
+        /// </summary>
+        /// <remarks>A connection over the limit is refused before it is registered: the endpoint answers HTTP 429 with a
+        /// <c>Retry-After</c> header, no SSE headers are sent and <see cref="ClientConnected"/> is not called. Connections
+        /// without a key are not affected by this limit (they count toward <see cref="MaxTotalConnections"/>). The
+        /// dashboard's own feed is never counted. Browsers' <c>EventSource</c> does not retry after a non-200 response.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxConnectionsPerKey
+        {
+            get => _maxConnectionsPerKey;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxConnectionsPerKey = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the maximum number of simultaneous user-facing connections (keyed and keyless). <see langword="null"/>
+        /// (the default) means unlimited.
+        /// </summary>
+        /// <remarks>A connection over the limit is refused before it is registered: the endpoint answers HTTP 503 with a
+        /// <c>Retry-After</c> header, no SSE headers are sent and <see cref="ClientConnected"/> is not called. The dashboard's own
+        /// feed is not counted; see <see cref="PingDropDashboardOptions.MaxFeedConnections"/>.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxTotalConnections
+        {
+            get => _maxTotalConnections;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxTotalConnections = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the maximum size, in UTF-8 bytes, of a notification's serialized JSON payload (the SSE <c>data</c>
+        /// field). <see langword="null"/> (the default) means unlimited.
+        /// </summary>
+        /// <remarks><see cref="IPingDropService.BroadcastAsync{T}"/> and <see cref="IPingDropService.SendToAsync{T}(string, T, string, System.Threading.CancellationToken)"/>
+        /// throw <see cref="PingDropPayloadTooLargeException"/> (an <see cref="ArgumentException"/>) for a larger payload,
+        /// even when nobody is connected. Nothing is delivered, no event id is consumed and no history entry is recorded.
+        /// A payload exactly at the limit is accepted. The dashboard's send endpoint answers 413.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxPayloadBytes
+        {
+            get => _maxPayloadBytes;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxPayloadBytes = value;
+            }
+        }
 
         /// <summary>
         /// Gets or sets a value indicating whether the dashboard is enabled.
         /// </summary>
         public bool EnableDashboard { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the bundled JavaScript client is served at
+        /// <c>{EndpointPath}/client.js</c>. Defaults to <see langword="true"/>.
+        /// </summary>
+        public bool ServeJavaScriptClient { get; set; } = true;
 
         /// <summary>
         /// Gets the configuration options for the Ping Drop Dashboard.
@@ -55,6 +211,24 @@ namespace PingDrop.Abstractions
         public Func<HttpContext, string?>? TargetKeyResolver { get; set; }
     }
     /// <summary>
+    /// Describes what happens when a notification arrives for a client whose queue is full.
+    /// </summary>
+    public enum PingDropQueueFullMode
+    {
+        /// <summary>The oldest queued notification is discarded to make room for the new one.</summary>
+        DropOldest,
+
+        /// <summary>The new notification is discarded and the queued ones are kept.</summary>
+        DropNewest,
+
+        /// <summary>
+        /// The client's stream is ended (the new notification is discarded). The client is removed and, being a
+        /// well-behaved <c>EventSource</c>, reconnects and starts with an empty queue.
+        /// </summary>
+        DisconnectClient
+    }
+
+    /// <summary>
     /// Dashboard configuration options.
     /// </summary>
     public sealed class PingDropDashboardOptions
@@ -63,10 +237,91 @@ namespace PingDrop.Abstractions
         /// Dashboard title.
         /// </summary>
         public string Title { get; set; } = "PingDrop Dashboard";
-        internal string EndpointPath { get; set; } = InternalConstants.DefaultEndpointPath;
         /// <summary>
-        /// Gets the full path to the dashboard endpoint.
+        /// Gets or sets the name of an authorization policy required for every dashboard route (page, assets, API and
+        /// live feed), including the ability to send notifications.
         /// </summary>
-        public string Path => $"{EndpointPath}/dashboard";
+        /// <remarks>When <see langword="null"/>, the dashboard is only mapped in the Development environment unless
+        /// <see cref="AllowAnonymous"/> is set; in other environments it is skipped and a warning is logged.</remarks>
+        public string? AuthorizationPolicy { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the dashboard may be mapped without an
+        /// <see cref="AuthorizationPolicy"/> outside the Development environment. Defaults to <see langword="false"/>.
+        /// </summary>
+        /// <remarks>The dashboard can send notifications to any client, so enable this only on a trusted network.</remarks>
+        public bool AllowAnonymous { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether a live-log line is published to the dashboard for every event
+        /// dispatched to a client. Defaults to <see langword="false"/>.
+        /// </summary>
+        /// <remarks>Connect and disconnect lines are always published while a dashboard feed is open. Per-dispatch
+        /// lines are the noisiest, so they are off by default. Nothing is built or serialized when the dashboard is
+        /// disabled or no dashboard feed is connected.</remarks>
+        public bool LogEachDispatch { get; set; }
+
+        private int? _maxSendsPerMinute;
+        private int? _maxFeedConnections = 10;
+
+        /// <summary>
+        /// Gets or sets the maximum number of notifications that may be sent through the dashboard's
+        /// <c>POST send-notification</c> endpoint per minute. <see langword="null"/> (the default) means unlimited.
+        /// </summary>
+        /// <remarks>A fixed one-minute window, counted from the first request in each window, shared by all callers of this
+        /// process. Every request counts, including ones later rejected as invalid. Requests over the limit are answered with
+        /// HTTP 429, a <c>Retry-After</c> header and the standard failure body. Sends from application code through
+        /// <see cref="IPingDropService"/> are not limited. The clock is the <see cref="TimeProvider"/> registered in DI, or
+        /// <see cref="TimeProvider.System"/>.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxSendsPerMinute
+        {
+            get => _maxSendsPerMinute;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxSendsPerMinute = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the maximum number of simultaneous dashboard live-feed connections (open dashboard pages).
+        /// Defaults to 10; <see langword="null"/> means unlimited.
+        /// </summary>
+        /// <remarks>These connections are separate from <see cref="PingDropOptions.MaxTotalConnections"/>. A feed over the cap is
+        /// answered with HTTP 503 and a <c>Retry-After</c> header.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxFeedConnections
+        {
+            get => _maxFeedConnections;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxFeedConnections = value;
+            }
+        }
+
+        internal string EndpointPath { get; set; } = InternalConstants.DefaultEndpointPath;
+
+        /// <summary>
+        /// Gets or sets a custom route for the dashboard (for example <c>/admin/pingdrop</c>) that replaces the default
+        /// <c>{EndpointPath}/dashboard</c>. A leading slash is added and trailing slashes are removed; <see langword="null"/>,
+        /// empty or <c>/</c> keeps the default.
+        /// </summary>
+        /// <remarks>Relative to the application's <c>PathBase</c>, like every other route.</remarks>
+        public string? PathOverride { get; set; }
+
+        /// <summary>
+        /// Gets the effective path of the dashboard endpoint: <see cref="PathOverride"/> when set, otherwise
+        /// <c>{EndpointPath}/dashboard</c>. It does not include the application's <c>PathBase</c>.
+        /// </summary>
+        public string Path
+        {
+            get
+            {
+                string custom = (PathOverride ?? string.Empty).Trim().Trim('/');
+                return custom.Length > 0 ? "/" + custom : $"{EndpointPath}/dashboard";
+            }
+        }
     }
 }

@@ -51,18 +51,16 @@ namespace PingDrop.Internal
         {
             var result = new List<PDDashboardModel.EventStreamMonitor>();
             var events = _eventHistoryStore.GetAll().OrderByDescending(e => e.Id).Take(100);
-            //foreach (var e in events)
-            //{
-            //    result.Add(new PDDashboardModel.EventStreamMonitor
-            //    {
-            //        Timestamp = e.TimestampUtc.ToString("yyyy-MM-dd hh:mm:ss"),
-            //        EventName = e.EventType,
-            //        ConnectionId = e.,
-            //        deliverdCount = e.DeliveredCount,
-            //        Status = e.DeliveredCount > 0 ? "Delivered" : "Pending",
-            //        Size = $"{e.Payload?.Length ?? 0} chars"
-            //    });
-            //}
+            foreach (var e in events)
+            {
+                result.Add(new PDDashboardModel.EventStreamMonitor
+                {
+                    Timestamp = e.TimestampUtc.ToString("yyyy-MM-dd hh:mm:ss"),
+                    EventName = e.EventType,
+                    TargetKey = e.TargetKey,
+                    Size = $"{e.Payload?.Length ?? 0} chars"
+                });
+            }
             return result;
         }
 

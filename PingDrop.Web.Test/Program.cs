@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using PingDrop.Abstractions;
 using PingDrop.Extensions;
@@ -122,20 +122,14 @@ app.MapPost("/send-to-multiple", async (
         Timestamp = payload.Timestamp ?? DateTime.UtcNow
     };
 
-    int successCount = 0;
     try
     {
-        foreach (var userId in payload.UserIds)
-        {
-            await notifier.SendToAsync(userId, notification, payload.EventType ?? "notification");
-            successCount++;
-        }
-
-        return Results.Ok(new { success = true, message = $"Sent to {successCount}/{payload.UserIds.Length} users" });
+        await notifier.SendToAsync(payload.UserIds, notification, payload.EventType ?? "notification");
+        return Results.Ok(new { success = true, message = $"Sent to {payload.UserIds.Length} user key(s)" });
     }
-    catch (Exception ex)
+    catch (ArgumentException ex)
     {
-        return Results.Ok(new { success = true, partial = true, sentCount = successCount, error = ex.Message });
+        return Results.BadRequest(new { error = ex.Message });
     }
 });
 

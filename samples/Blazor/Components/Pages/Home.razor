@@ -1,0 +1,69 @@
+@page "/"
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject IPingDropService PingDrop
+
+<h1>PingDrop + Blazor Server</h1>
+
+<p>Listening as <strong>@UserId</strong> (status: @status). Append <code>?userId=bob</code> to the URL to change it.</p>
+
+<button @onclick="SendToMe">Send to me</button>
+<button @onclick="Broadcast">Broadcast</button>
+
+<ul>
+    @foreach (var line in events)
+    {
+        <li>@line</li>
+    }
+</ul>
+
+@code {
+    [Parameter, SupplyParameterFromQuery] public string? UserId { get; set; }
+
+    private readonly List<string> events = new();
+    private string status = "connecting";
+    private IJSObjectReference? module;
+    private DotNetObjectReference<Home>? self;
+
+    protected override void OnInitialized() => UserId ??= "alice";
+
+    // JS interop must wait until the circuit is connected, hence OnAfterRenderAsync(firstRender).
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        self = DotNetObjectReference.Create(this);
+        module = await JS.InvokeAsync<IJSObjectReference>("import", "/pingdrop-interop.js");
+        await module.InvokeVoidAsync("start", self, UserId);
+    }
+
+    // Called from JavaScript for every event the PingDrop client receives.
+    [JSInvokable]
+    public Task OnPingDropEvent(string type, string json)
+    {
+        if (type == "status") status = json;
+        else events.Insert(0, $"{type}: {json}");
+        return InvokeAsync(StateHasChanged);   // marshal back onto the component's sync context
+    }
+
+    // Server-side Blazor can use IPingDropService directly; no HTTP round trip needed.
+    private Task SendToMe() =>
+        PingDrop.SendToAsync(UserId!, new { Text = $"Hello {UserId}" }, "notification").AsTask();
+
+    private Task Broadcast() =>
+        PingDrop.BroadcastAsync(new { Text = "Hello everyone" }, "notification").AsTask();
+
+    public async ValueTask DisposeAsync()
+    {
+        if (module is not null)
+        {
+            try
+            {
+                await module.InvokeVoidAsync("stop");
+                await module.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { /* circuit already gone */ }
+        }
+        self?.Dispose();
+    }
+}

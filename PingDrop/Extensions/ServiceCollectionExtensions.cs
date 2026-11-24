@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using PingDrop.Abstractions;
 using PingDrop.Internal;
 
@@ -32,11 +33,27 @@ namespace PingDrop.Extensions
             configure?.Invoke(options);
 
             services.AddSingleton(options);
+            if (options.AllowedOrigins is { Length: > 0 } origins)
+            {
+                if (!string.IsNullOrWhiteSpace(options.CorsPolicy))
+                    throw new InvalidOperationException("Set either PingDropOptions.CorsPolicy or PingDropOptions.AllowedOrigins, not both.");
+                if (origins.Any(o => string.IsNullOrWhiteSpace(o) || o.Contains('*')))
+                    throw new InvalidOperationException("PingDropOptions.AllowedOrigins takes exact origins (for example https://app.example.com); wildcards are not supported. Register your own CORS policy and set CorsPolicy instead.");
+                services.AddCors(c => c.AddPolicy(PingDropOptions.BuiltInCorsPolicyName, p => p
+                    .WithOrigins(origins)
+                    .WithMethods("GET")
+                    .WithHeaders("Last-Event-ID")
+                    .AllowCredentials()));
+            }
             services.AddSingleton<INotificationFactory, NotificationFactory>();
-            services.AddSingleton<IPDConnectionStore, PDConnectionStore>();
+            services.AddSingleton<IPDConnectionStore>(sp => new PDConnectionStore(options.ClientQueueCapacity, options.ClientQueueFullMode));
             services.AddSingleton<IEventHistoryStore, PDEventHistoryStore>(sp => new PDEventHistoryStore(options.EventHistorySize));
             services.AddSingleton<PingDropHub>();
             services.AddSingleton<IPingDropService>(sp => sp.GetRequiredService<PingDropHub>());
+            services.AddSingleton<PingDropMetrics>();
+            services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<PingDropMetrics>());
+            services.AddSingleton<PDShutdownService>();
+            services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<PDShutdownService>());
             services.AddSingleton<IEventPublisher, PDEventPublisher>();
             services.AddSingleton<IDashboardService, DashboardService>();
 

@@ -1,0 +1,12 @@
+{
+  "name": "pingdrop-client",
+  "version": "0.1.0",
+  "description": "Tiny dependency-free browser client for PingDrop SSE streams: typed handlers, event filtering, reconnect with backoff.",
+  "main": "pingdrop.js",
+  "types": "pingdrop.d.ts",
+  "files": ["pingdrop.js", "pingdrop.d.ts", "README.md"],
+  "scripts": { "test": "node --test test/*.test.js" },
+  "keywords": ["pingdrop", "sse", "eventsource", "server-sent-events"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/goldi0002/PingDrop.git", "directory": "clients/js" }
+}

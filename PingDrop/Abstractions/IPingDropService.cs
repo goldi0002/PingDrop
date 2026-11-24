@@ -29,5 +29,25 @@
         /// <returns>A <see cref="ValueTask"/> that represents the asynchronous operation.</returns>
         ValueTask SendToAsync<T>(string targetKey, T notification, string eventType = "message", CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Sends a single notification to every connection of every specified target key.
+        /// </summary>
+        /// <remarks>
+        /// The notification is published as one event: it is serialized once, receives one id, is counted once in the
+        /// published-events metric and is recorded once in the event history. Its <c>TargetKey</c> in the history is the
+        /// distinct keys joined with a comma (for display only). Keys are de-duplicated and null or blank entries are ignored.
+        /// Connections whose event-type filter excludes <paramref name="eventType"/> are skipped. If no connection matches
+        /// any key, nothing is published or recorded.
+        /// </remarks>
+        /// <typeparam name="T">The type of the notification to send.</typeparam>
+        /// <param name="targetKeys">The keys identifying the recipients. Must contain at least one non-blank key.</param>
+        /// <param name="notification">The notification object to send. Cannot be <see langword="null"/>.</param>
+        /// <param name="eventType">The type of event associated with the notification. Defaults to "message" if not specified.</param>
+        /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+        /// <returns>A <see cref="ValueTask"/> that represents the asynchronous operation.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="targetKeys"/> or <paramref name="notification"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="targetKeys"/> contains no non-blank key.</exception>
+        ValueTask SendToAsync<T>(IEnumerable<string> targetKeys, T notification, string eventType = "message", CancellationToken cancellationToken = default);
+
     }
 }

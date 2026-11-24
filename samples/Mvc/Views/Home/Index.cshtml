@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PingDrop MVC sample</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    #toasts { position: fixed; top: 1rem; right: 1rem; display: grid; gap: .5rem; }
+    .toast { background: #222; color: #fff; padding: .6rem .9rem; border-radius: 6px; min-width: 14rem; }
+    .toast b { display: block; }
+  </style>
+</head>
+<body>
+  <h1>PingDrop MVC sample</h1>
+
+  @if (User.Identity?.IsAuthenticated == true)
+  {
+      <p>Signed in as <strong>@User.Identity.Name</strong>. <a href="/logout">Sign out</a></p>
+
+      <form method="post" asp-action="ShipOrder"><button>Ship order (notify me)</button></form>
+      <form method="post" asp-action="Announce"><button>Announce (notify everyone)</button></form>
+      <p>Open a second browser profile signed in as another user to see that "ship order" only reaches you.</p>
+
+      <div id="toasts"></div>
+
+      <script src="/pingdrop/stream/client.js"></script>
+      <script>
+        // No userId parameter: the server derives the key from the auth cookie.
+        const client = new PingDropClient({ url: "/pingdrop/stream", withCredentials: true });
+
+        client.on("notification", d => {
+          const el = document.createElement("div");
+          el.className = "toast";
+          el.innerHTML = "<b></b><span></span>";
+          el.querySelector("b").textContent = d.Title;
+          el.querySelector("span").textContent = d.Message;
+          document.getElementById("toasts").append(el);
+          setTimeout(() => el.remove(), 5000);
+        });
+      </script>
+  }
+  else
+  {
+      <p>Not signed in. Fake sign-in as <a href="/login?user=alice">alice</a> or <a href="/login?user=bob">bob</a>.</p>
+  }
+</body>
+</html>

@@ -11,7 +11,10 @@
         public long Id { get; init; }
         public string? EventType { get; init; }
         public string? Payload { get; init; }
+        /// <summary>Display string for the target: the key, or the keys joined with a comma for a multi-key send. Ambiguous if a key contains a comma; use <see cref="TargetKeys"/> for logic.</summary>
         public string? TargetKey { get; init; }
+        /// <summary>The structured list of subscriber keys this event was sent to, or <see langword="null"/> for a broadcast.</summary>
+        public IReadOnlyList<string>? TargetKeys { get; init; }
         public DateTime TimestampUtc { get; init; }
     }
 }

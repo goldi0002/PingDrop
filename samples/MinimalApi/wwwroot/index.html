@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PingDrop minimal API sample</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    li { padding: .25rem 0; border-bottom: 1px solid #ddd; }
+    code { background: #eee; padding: 0 .25rem; }
+  </style>
+</head>
+<body>
+  <h1>PingDrop minimal API</h1>
+  <p>Connected as <strong id="who"></strong> (change with <code>?userId=bob</code>). Status: <span id="status">connecting</span></p>
+  <p>Try: <code>curl -X POST "http://localhost:5000/send/alice?text=hi"</code></p>
+  <ul id="log"></ul>
+
+  <!-- Bundled client, served by MapPingDrop. -->
+  <script src="/pingdrop/stream/client.js"></script>
+  <script>
+    const userId = new URLSearchParams(location.search).get("userId") || "alice";
+    document.getElementById("who").textContent = userId;
+
+    const client = new PingDropClient({
+      url: "/pingdrop/stream",
+      eventTypes: ["notification"],
+      params: { userId }            // read by TargetKeyResolver on the server
+    });
+
+    client.on("open", () => document.getElementById("status").textContent = "connected");
+    client.on("error", () => document.getElementById("status").textContent = "reconnecting");
+    client.on("notification", data => {
+      const li = document.createElement("li");
+      li.textContent = `${data.At} - ${data.Text}`;
+      document.getElementById("log").prepend(li);
+    });
+  </script>
+</body>
+</html>

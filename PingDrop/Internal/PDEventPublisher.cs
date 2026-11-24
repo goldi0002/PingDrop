@@ -1,14 +1,20 @@
 ﻿using PingDrop.Abstractions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Diagnostics;
 
 namespace PingDrop.Internal
 {
-    internal sealed class PDEventPublisher(IPDConnectionStore connectionStore, IEventHistoryStore eventHistoryStore,INotificationFactory notificationFactory, ActivitySource activitySource) : IEventPublisher
+    internal sealed class PDEventPublisher(IPDConnectionStore connectionStore, IEventHistoryStore eventHistoryStore,INotificationFactory notificationFactory, ActivitySource activitySource, PingDropOptions options, ILoggerFactory? loggerFactory = null) : IEventPublisher
     {
+        private readonly ILogger _logger = loggerFactory?.CreateLogger(PDLog.Category) ?? NullLogger.Instance;
         private readonly ActivitySource _activitySource = activitySource;
         private readonly IPDConnectionStore _connectionStore = connectionStore;
         private readonly IEventHistoryStore _eventHistoryStore = eventHistoryStore;
         private readonly INotificationFactory _notificationFactory = notificationFactory;
+
+        /// <inheritdoc />
+        public bool IsActive => options.EnableDashboard && _connectionStore.CountByKey(InternalConstants.DashboardSubscriberKey) > 0;
 
         public ValueTask PublishAsync<T>(T notification, string eventType = "message", CancellationToken cancellationToken = default)
         {
@@ -35,6 +41,7 @@ namespace PingDrop.Internal
                     }
                     catch (Exception ex)
                     {
+                        PDLog.DashboardWriteFailed(_logger, ex);
                         activity?.SetTag("exception.type", ex.GetType().Name);
                         activity?.SetTag("exception.message", ex.Message);
                         activity?.SetTag("exception.stacktrace", ex.StackTrace);

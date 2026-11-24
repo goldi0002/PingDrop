@@ -15,6 +15,12 @@ namespace PingDrop.Abstractions
     internal interface IEventPublisher
     {
         /// <summary>
+        /// Gets a value indicating whether anything is listening, that is the dashboard is enabled and at least one
+        /// dashboard feed connection is open. Check this before building optional (for example live-log) payloads.
+        /// </summary>
+        bool IsActive { get; }
+
+        /// <summary>
         /// Publishes a notification asynchronously to the specified event type.
         /// </summary>
         /// <remarks>The method sends the provided notification to the specified event type. If the

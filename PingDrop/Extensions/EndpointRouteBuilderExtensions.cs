@@ -2,6 +2,8 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using PingDrop.Abstractions;
 using PingDrop.Internal;
 using PingDrop.Models;
@@ -45,13 +47,55 @@ namespace PingDrop.Extensions
         {
             IServiceProvider? sp = endpoints.ServiceProvider;
             PingDropOptions? options = sp.GetRequiredService<PingDropOptions>();
-            endpoints.MapGet(options.EndpointPath ?? InternalConstants.DefaultEndpointPath, HandleSseConnection);
+            RouteHandlerBuilder stream = endpoints.MapGet(options.EndpointPath ?? InternalConstants.DefaultEndpointPath, HandleSseConnection);
+
+            if (!string.IsNullOrWhiteSpace(options.AuthorizationPolicy))
+            {
+                stream.RequireAuthorization(options.AuthorizationPolicy);
+            }
+
+            string? corsPolicy = options.EffectiveCorsPolicy;
+            if (corsPolicy is not null)
+            {
+                stream.RequireCors(corsPolicy);
+            }
+
+            if (options.ServeJavaScriptClient)
+            {
+                IEndpointConventionBuilder client = MapJavaScriptClient(endpoints, options.EndpointPath ?? InternalConstants.DefaultEndpointPath);
+                if (corsPolicy is not null) client.RequireCors(corsPolicy);
+            }
 
             if (options.EnableDashboard)
             {
+                bool secured = !string.IsNullOrWhiteSpace(options.Dashboard.AuthorizationPolicy);
+                IHostEnvironment? environment = sp.GetService<IHostEnvironment>();
+
+                if (!secured && !options.Dashboard.AllowAnonymous && environment is not null && !environment.IsDevelopment())
+                {
+                    sp.GetService<ILoggerFactory>()?.CreateLogger("PingDrop").LogWarning(
+                        "The PingDrop dashboard is enabled but was not mapped: it has no authorization policy and the environment is '{Environment}'. " +
+                        "Set PingDropOptions.Dashboard.AuthorizationPolicy (recommended), set Dashboard.AllowAnonymous = true, or set EnableDashboard = false.",
+                        environment.EnvironmentName);
+
+                    return endpoints;
+                }
+
                 options.Dashboard.EndpointPath = options.EndpointPath ?? InternalConstants.DefaultEndpointPath;
-                endpoints.MapGet(options.Dashboard.Path + "/sse", HandleDashboardSseConnection);
-                return endpoints.MapDashboard(options);
+
+                // All dashboard routes go through one group so the policy is applied to every one of them.
+                RouteGroupBuilder dashboard = endpoints.MapGroup(string.Empty);
+                dashboard.MapGet(options.Dashboard.Path + "/sse", HandleDashboardSseConnection);
+                dashboard.MapDashboard(options);
+                // The dashboard can send notifications, so it stays same-origin even when the app has a default CORS policy.
+                // (CORS metadata requires UseCors, so it is only added for apps that already opted in to CORS for PingDrop.)
+                if (options.EffectiveCorsPolicy is not null)
+                    dashboard.WithMetadata(new Microsoft.AspNetCore.Cors.DisableCorsAttribute());
+
+                if (secured)
+                {
+                    dashboard.RequireAuthorization(options.Dashboard.AuthorizationPolicy!);
+                }
             }
 
             return endpoints;
@@ -78,13 +122,49 @@ namespace PingDrop.Extensions
             response.Headers.Append("X-Content-Type-Options", "nosniff");
         }
 
-        private static async Task HandleSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options, IEventPublisher eventPublisher)
+        private const int DefaultRetryAfterSeconds = 5;
+
+        private static void RejectConnection(HttpResponse response, PDConnectionRejection rejection, PingDropOptions options)
         {
-            AddSseHeaders(context.Response);
+            // Per key: 429 (this caller has too many). Total / dashboard feeds: 503 (the server is full).
+            response.StatusCode = rejection == PDConnectionRejection.PerKey ? StatusCodes.Status429TooManyRequests : StatusCodes.Status503ServiceUnavailable;
+
+            double retry = options.ClientRetryInterval.TotalSeconds;
+            int seconds = retry > 0 ? (int)Math.Ceiling(retry) : DefaultRetryAfterSeconds;
+            response.Headers.RetryAfter = Math.Max(1, seconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static async Task HandleSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options, IEventPublisher eventPublisher, ILoggerFactory loggerFactory, IHostApplicationLifetime lifetime)
+        {
+            // Once the host is stopping, new streams are refused so they cannot hang past shutdown (clients retry the next instance).
+            if (lifetime.ApplicationStopping.IsCancellationRequested)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+
+            ILogger logger = loggerFactory.CreateLogger(PDLog.Category);
 
             HashSet<string>? events = ParseEvents(context.Request.Query[InternalConstants.DefaultQueryEventTypeParam]);
             string? subscriberKey = options.TargetKeyResolver?.Invoke(context);
-            await using PDClientConnection client = hub.AddClient(events, subscriberKey);
+            long? lastEventId = options.EnableReplay ? PDReplay.ParseLastEventId(context.Request) : null;
+
+            // The client is registered (live events start queueing) before the history is snapshotted below. The limit check and
+            // the registration are one atomic step; a refused connection gets a bare status and Retry-After, never SSE headers.
+            PDConnectionLimits limits = new(options.MaxConnectionsPerKey, options.MaxTotalConnections, null);
+            PDConnectionRejection rejection = hub.TryAddClient(events, subscriberKey, limits, out PDClientConnection? added);
+            if (rejection != PDConnectionRejection.None)
+            {
+                RejectConnection(context.Response, rejection, options);
+                hub.WarnConnectionRejected(rejection, limits);
+                return;
+            }
+
+            AddSseHeaders(context.Response);
+            await using PDClientConnection client = added!;
+            PDLog.ClientConnected(logger, client.ConnectionId, subscriberKey);
+            // Shutdown may have swept the store just before this client was added; complete it so the loop below ends.
+            if (lifetime.ApplicationStopping.IsCancellationRequested) await client.DisposeAsync();
 
             if (options.ClientConnected is not null)
             {
@@ -92,25 +172,85 @@ namespace PingDrop.Extensions
                 {
                     await options.ClientConnected(client.ConnectionId);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-
+                    PDLog.ClientConnectedCallbackFailed(logger, client.ConnectionId, ex);
                 }
             }
 
-            await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Client connected: {client.ConnectionId}", DateTime.UtcNow.ToString("O")), "log", context.RequestAborted);
+            if (eventPublisher.IsActive)
+                await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Client connected: {client.ConnectionId}", DateTime.UtcNow.ToString("O")), "log", context.RequestAborted);
 
             try
             {
+                // Register first, then flush: once the client sees headers it is guaranteed to receive broadcasts.
+                await PDSseWriter.WriteConnectedAsync(context.Response, options.ClientRetryInterval, context.RequestAborted);
+
+                // Replay missed events. They are written straight to the response (not through the bounded queue), so a gap
+                // larger than the queue cannot lose any. Live events published meanwhile wait in the queue.
+                // Anything in the queue with an id up to dedupeThrough was already sent (or already seen by the client).
+                long dedupeThrough = 0;
+                if (lastEventId is long seen)
+                {
+                    dedupeThrough = seen;
+                    long newestId = hub.LastIssuedEventId;
+                    if (seen > newestId)
+                    {
+                        // Ids restart with the process; nothing can be said about what this client missed.
+                        dedupeThrough = 0;
+                        PDLog.ReplaySkippedUnknownId(logger, client.ConnectionId, seen, newestId);
+                    }
+                    else
+                    {
+                        // Snapshot, write, and snapshot again until nothing newer is retained. Writing a long replay takes
+                        // time during which live events keep queueing; a small queue may evict some of them, but every
+                        // event is in the history first, so the next round re-sends whatever is still missing. When a
+                        // round finds nothing, every later event is delivered after the client registered and is in the queue.
+                        int replayed = 0;
+                        while (true)
+                        {
+                            IReadOnlyList<PDNotification> missed = hub.GetReplayEvents(client, dedupeThrough);
+                            if (missed.Count == 0) break;
+
+                            foreach (PDNotification missedEvent in missed)
+                            {
+                                try
+                                {
+                                    await PDSseWriter.WriteAsync(context.Response, missedEvent, context.RequestAborted);
+                                    hub.RecordReplayedDelivery();
+                                    client.MarkDelivered();
+                                    dedupeThrough = missedEvent.Id;
+                                    replayed++;
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    hub.IncrementDroppedDispatches();
+                                    throw;
+                                }
+                            }
+                        }
+                        if (replayed > 0)
+                            PDLog.EventsReplayed(logger, replayed, client.ConnectionId, seen);
+                    }
+                }
+
                 var channelReader = client.NotificationChannel.Reader;
-                while (await channelReader.WaitToReadAsync(context.RequestAborted))
+                while (await WaitToReadWithHeartbeatAsync(channelReader, context.Response, options.HeartbeatInterval, client, context.RequestAborted))
                 {
                     while (channelReader.TryRead(out var evt))
                     {
+                        if (evt.Id <= dedupeThrough)
+                        {
+                            // Already replayed (or already seen by the client): published while the replay was being built.
+                            // Its queued copy counted as an attempted delivery, so close it out as dispatched.
+                            hub.IncrementSuccessfulDispatches();
+                            continue;
+                        }
                         try
                         {
                             await PDSseWriter.WriteAsync(context.Response, evt, context.RequestAborted);
-                            await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Event dispatched to client {client.ConnectionId}: {evt.EventType}", DateTime.UtcNow.ToString("O")), "log", context.RequestAborted);
+                            if (options.Dashboard.LogEachDispatch && eventPublisher.IsActive)
+                                await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Event dispatched to client {client.ConnectionId}: {evt.EventType}", DateTime.UtcNow.ToString("O")), "log", context.RequestAborted);
                             hub.IncrementSuccessfulDispatches();
                             client.MarkDelivered();
                         }
@@ -130,13 +270,15 @@ namespace PingDrop.Extensions
             finally
             {
                 hub.RemoveClient(client.ConnectionId);
+                PDLog.ClientDisconnected(logger, client.ConnectionId);
                 try
                 {
-                    await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Client disconnected: {client.ConnectionId}", DateTime.UtcNow.ToString("O")), "log", CancellationToken.None);
+                    if (eventPublisher.IsActive)
+                        await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Client disconnected: {client.ConnectionId}", DateTime.UtcNow.ToString("O")), "log", CancellationToken.None);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-
+                    PDLog.LiveLogPublishFailed(logger, ex);
                 }
 
                 if (options.ClientDisconnected is not null)
@@ -145,22 +287,40 @@ namespace PingDrop.Extensions
                     {
                         await options.ClientDisconnected(client.ConnectionId);
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
-
+                        PDLog.ClientDisconnectedCallbackFailed(logger, client.ConnectionId, ex);
                     }
                 }
             }
         }
-        private static async Task HandleDashboardSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options)
+        private static async Task HandleDashboardSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options, IHostApplicationLifetime lifetime)
         {
-            AddSseHeaders(context.Response);
+            if (lifetime.ApplicationStopping.IsCancellationRequested)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+
             HashSet<string>? events = ParseEvents(context.Request.Query[InternalConstants.DefaultQueryEventTypeParam]);
-            await using PDClientConnection dashboardClient = hub.AddClient(events, InternalConstants.DashboardSubscriberKey);
+            PDConnectionLimits limits = new(null, null, options.Dashboard.MaxFeedConnections);
+            PDConnectionRejection rejection = hub.TryAddClient(events, InternalConstants.DashboardSubscriberKey, limits, out PDClientConnection? added);
+            if (rejection != PDConnectionRejection.None)
+            {
+                RejectConnection(context.Response, rejection, options);
+                hub.WarnConnectionRejected(rejection, limits);
+                return;
+            }
+
+            AddSseHeaders(context.Response);
+            await using PDClientConnection dashboardClient = added!;
+            if (lifetime.ApplicationStopping.IsCancellationRequested) await dashboardClient.DisposeAsync();
             try
             {
+                // Register first, then flush: once the client sees headers it is guaranteed to receive broadcasts.
+                await PDSseWriter.WriteConnectedAsync(context.Response, options.ClientRetryInterval, context.RequestAborted);
                 var channelReader = dashboardClient.NotificationChannel.Reader;
-                while (await channelReader.WaitToReadAsync(context.RequestAborted))
+                while (await WaitToReadWithHeartbeatAsync(channelReader, context.Response, options.HeartbeatInterval, dashboardClient, context.RequestAborted))
                 {
                     while (channelReader.TryRead(out var log))
                     {
@@ -178,6 +338,34 @@ namespace PingDrop.Extensions
                 hub.RemoveClient(dashboardClient.ConnectionId);
             }
         }
+        /// <summary>
+        /// Waits for the next notification, writing a <c>: ping</c> comment every <paramref name="interval"/> while idle.
+        /// Returns false when the channel is completed. Heartbeats refresh connection activity but are not counted as deliveries.
+        /// </summary>
+        private static async ValueTask<bool> WaitToReadWithHeartbeatAsync(ChannelReader<PDNotification> reader, HttpResponse response,
+            TimeSpan interval, PDClientConnection client, CancellationToken cancellationToken)
+        {
+            if (interval <= TimeSpan.Zero)
+            {
+                return await reader.WaitToReadAsync(cancellationToken);
+            }
+
+            while (true)
+            {
+                using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(interval);
+                try
+                {
+                    return await reader.WaitToReadAsync(timeout.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    await PDSseWriter.WriteCommentAsync(response, "ping", cancellationToken);
+                    client.MarkActivity();
+                }
+            }
+        }
+
         private static HashSet<string>? ParseEvents(string? value)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -192,25 +380,29 @@ namespace PingDrop.Extensions
             endpoints.MapGet(options.Dashboard.Path + "/app.css", async context =>
             {
                 string css = await PDEmbeddedFileProvider.ReadAsync("app.css");
-                context.Response.ContentType = "text/css";
+                context.Response.ContentType = "text/css; charset=utf-8";
                 await context.Response.WriteAsync(css);
             });
             endpoints.MapGet(options.Dashboard.Path + "/app.js", async context =>
             {
                 string? js = await PDEmbeddedFileProvider.ReadAsync("app.js");
-                context.Response.ContentType = "text/javscript";
+                context.Response.ContentType = "text/javascript; charset=utf-8";
                 await context.Response.WriteAsync(js);
             });
             endpoints.MapGet(options.Dashboard.Path, async context =>
             {
                 string? dashboard = await PDEmbeddedFileProvider.ReadAsync("Index.html");
-                context.Response.ContentType = "text/html";
-                dashboard = dashboard.Replace("{{DASHBOARD_PATH}}", options.Dashboard.Path);
+                context.Response.ContentType = "text/html; charset=utf-8";
+                // Absolute URLs in the page must include the PathBase (UsePathBase / reverse-proxy prefix) the request came through.
+                dashboard = dashboard.Replace("{{DASHBOARD_PATH}}", SafeUrlPath(context.Request.PathBase.ToUriComponent() + options.Dashboard.Path));
                 dashboard = dashboard.Replace("{{DASHBOARD_TITLE}}", !string.IsNullOrEmpty(options.Dashboard.Title) ? options.Dashboard.Title : "PingDrop Dashboard");
                 await context.Response.WriteAsync(dashboard);
             });
             return endpoints;
         }
+        private static string SafeUrlPath(string path) =>
+            path.Replace("'", "%27").Replace("\"", "%22").Replace("<", "%3C").Replace(">", "%3E").Replace("\\", "%5C").Replace("&", "%26");
+
         private static IReadOnlyCollection<PDMetrics> GetCombinedMetrics(PingDropHub hub, IDashboardService dashboardService)
         {
             var hubMetrics = hub.GetMetrics();
@@ -294,15 +486,28 @@ namespace PingDrop.Extensions
                     var connections = _dashboardService.GetConnections(statusFilter, searchText);
                     await context.Response.WriteAsJsonAsync(ApiResponse<IReadOnlyCollection<PDDashboardModel.ConnectionInfo>>.Success(connections), _jsonOptions, context.RequestAborted);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    PDLog.DashboardConnectionsFailed(context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(PDLog.Category), ex);
                     context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                     await context.Response.WriteAsJsonAsync(ApiResponse<IReadOnlyCollection<PDDashboardModel.ConnectionInfo>>.Failure("Failed to retrieve connections"), _jsonOptions, context.RequestAborted);
                 }
             });
 
+            PDSendRateLimiter? sendLimiter = options.Dashboard.MaxSendsPerMinute is int maxSends
+                ? new PDSendRateLimiter(maxSends, endpoints.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System)
+                : null;
+
             endpoints.MapPost(options.Dashboard.Path + "/send-notification", async context =>
             {
+                if (sendLimiter is not null && !sendLimiter.TryAcquire(out int retryAfterSeconds))
+                {
+                    context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure($"Too many notifications sent from the dashboard (limit {options.Dashboard.MaxSendsPerMinute} per minute). Retry in {retryAfterSeconds} second(s)."), _jsonOptions, context.RequestAborted);
+                    return;
+                }
+
                 NotificationRequest? request = await context.Request.ReadFromJsonAsync<NotificationRequest>(context.RequestAborted);
 
                 if (request is null)
@@ -344,41 +549,51 @@ namespace PingDrop.Extensions
                 }
 
                 bool notificationSent = false;
-                if (string.IsNullOrEmpty(request.TargetType))
+                try
                 {
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure("TargetType is required"), _jsonOptions, context.RequestAborted);
-                    return;
-                }
-                if (request.TargetType.Equals("key", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (string.IsNullOrWhiteSpace(request.TargetId))
+                    if (string.IsNullOrEmpty(request.TargetType))
                     {
                         context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                        await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure("TargetId is required for key notifications"), _jsonOptions, context.RequestAborted);
+                        await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure("TargetType is required"), _jsonOptions, context.RequestAborted);
                         return;
                     }
-
-                    await hub.SendToAsync(request.TargetId, request.Payload, request.EventName!, context.RequestAborted);
-
-                    notificationSent = true;
-                }
-                else if (request.TargetType.Equals("connection", StringComparison.OrdinalIgnoreCase))
-                {
-                    var connection = _connectionStore.GetAll().FirstOrDefault(c => c.ConnectionId.ToString() == request.TargetId);
-
-                    if (connection is not null && !string.IsNullOrWhiteSpace(connection.SubscriberKey))
+                    if (request.TargetType.Equals("key", StringComparison.OrdinalIgnoreCase))
                     {
-                        await hub.SendToAsync(connection.SubscriberKey, request.Payload, request.EventName!, context.RequestAborted);
+                        if (string.IsNullOrWhiteSpace(request.TargetId))
+                        {
+                            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                            await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure("TargetId is required for key notifications"), _jsonOptions, context.RequestAborted);
+                            return;
+                        }
+
+                        await hub.SendToAsync(request.TargetId, request.Payload, request.EventName!, context.RequestAborted);
 
                         notificationSent = true;
                     }
-                }
-                else if (request.TargetType.Equals("broadcast", StringComparison.OrdinalIgnoreCase))
-                {
-                    await hub.BroadcastAsync(request.Payload, request.EventName!, context.RequestAborted);
+                    else if (request.TargetType.Equals("connection", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var connection = _connectionStore.GetAll().FirstOrDefault(c => c.ConnectionId.ToString() == request.TargetId);
 
-                    notificationSent = true;
+                        if (connection is not null && !string.IsNullOrWhiteSpace(connection.SubscriberKey))
+                        {
+                            await hub.SendToAsync(connection.SubscriberKey, request.Payload, request.EventName!, context.RequestAborted);
+
+                            notificationSent = true;
+                        }
+                    }
+                    else if (request.TargetType.Equals("broadcast", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await hub.BroadcastAsync(request.Payload, request.EventName!, context.RequestAborted);
+
+                        notificationSent = true;
+                    }
+
+                }
+                catch (PingDropPayloadTooLargeException ex)
+                {
+                    context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                    await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure(ex.Message), _jsonOptions, context.RequestAborted);
+                    return;
                 }
 
                 if (!notificationSent)
@@ -388,11 +603,32 @@ namespace PingDrop.Extensions
                         context.RequestAborted);
                     return;
                 }
-                await _pub.PublishAsync(JsonSerializer.Serialize(ApiResponse<IReadOnlyCollection<PDMetrics>>.Success(GetCombinedMetrics(hub, _dashboardService)), _jsonOptions), "metrics", CancellationToken.None);
+                if (_pub.IsActive)
+                    await _pub.PublishAsync(JsonSerializer.Serialize(ApiResponse<IReadOnlyCollection<PDMetrics>>.Success(GetCombinedMetrics(hub, _dashboardService)), _jsonOptions), "metrics", CancellationToken.None);
                 await context.Response.WriteAsJsonAsync(ApiResponse<object>.Success(new { }, "Notification sent successfully"), _jsonOptions, context.RequestAborted);
             });
 
             return endpoints;
+        }
+
+        private static IEndpointConventionBuilder MapJavaScriptClient(IEndpointRouteBuilder endpoints, string streamPath)
+        {
+            byte[]? script = null;
+            return endpoints.MapGet(streamPath.TrimEnd('/') + "/client.js", async context =>
+            {
+                if (script is null)
+                {
+                    using Stream stream = typeof(EndpointRouteBuilderExtensions).Assembly
+                        .GetManifestResourceStream("PingDrop.Client.pingdrop.js")!;
+                    using MemoryStream ms = new();
+                    await stream.CopyToAsync(ms);
+                    script = ms.ToArray();
+                }
+
+                context.Response.ContentType = "text/javascript; charset=utf-8";
+                context.Response.Headers.CacheControl = "public, max-age=3600";
+                await context.Response.Body.WriteAsync(script, context.RequestAborted);
+            });
         }
     }
 }
