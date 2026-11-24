@@ -54,9 +54,16 @@ namespace PingDrop.Extensions
                 stream.RequireAuthorization(options.AuthorizationPolicy);
             }
 
+            string? corsPolicy = options.EffectiveCorsPolicy;
+            if (corsPolicy is not null)
+            {
+                stream.RequireCors(corsPolicy);
+            }
+
             if (options.ServeJavaScriptClient)
             {
-                MapJavaScriptClient(endpoints, options.EndpointPath ?? InternalConstants.DefaultEndpointPath);
+                IEndpointConventionBuilder client = MapJavaScriptClient(endpoints, options.EndpointPath ?? InternalConstants.DefaultEndpointPath);
+                if (corsPolicy is not null) client.RequireCors(corsPolicy);
             }
 
             if (options.EnableDashboard)
@@ -80,6 +87,10 @@ namespace PingDrop.Extensions
                 RouteGroupBuilder dashboard = endpoints.MapGroup(string.Empty);
                 dashboard.MapGet(options.Dashboard.Path + "/sse", HandleDashboardSseConnection);
                 dashboard.MapDashboard(options);
+                // The dashboard can send notifications, so it stays same-origin even when the app has a default CORS policy.
+                // (CORS metadata requires UseCors, so it is only added for apps that already opted in to CORS for PingDrop.)
+                if (options.EffectiveCorsPolicy is not null)
+                    dashboard.WithMetadata(new Microsoft.AspNetCore.Cors.DisableCorsAttribute());
 
                 if (secured)
                 {
@@ -350,12 +361,16 @@ namespace PingDrop.Extensions
             {
                 string? dashboard = await PDEmbeddedFileProvider.ReadAsync("Index.html");
                 context.Response.ContentType = "text/html; charset=utf-8";
-                dashboard = dashboard.Replace("{{DASHBOARD_PATH}}", options.Dashboard.Path);
+                // Absolute URLs in the page must include the PathBase (UsePathBase / reverse-proxy prefix) the request came through.
+                dashboard = dashboard.Replace("{{DASHBOARD_PATH}}", SafeUrlPath(context.Request.PathBase.ToUriComponent() + options.Dashboard.Path));
                 dashboard = dashboard.Replace("{{DASHBOARD_TITLE}}", !string.IsNullOrEmpty(options.Dashboard.Title) ? options.Dashboard.Title : "PingDrop Dashboard");
                 await context.Response.WriteAsync(dashboard);
             });
             return endpoints;
         }
+        private static string SafeUrlPath(string path) =>
+            path.Replace("'", "%27").Replace("\"", "%22").Replace("<", "%3C").Replace(">", "%3E").Replace("\\", "%5C").Replace("&", "%26");
+
         private static IReadOnlyCollection<PDMetrics> GetCombinedMetrics(PingDropHub hub, IDashboardService dashboardService)
         {
             var hubMetrics = hub.GetMetrics();
@@ -542,10 +557,10 @@ namespace PingDrop.Extensions
             return endpoints;
         }
 
-        private static void MapJavaScriptClient(IEndpointRouteBuilder endpoints, string streamPath)
+        private static IEndpointConventionBuilder MapJavaScriptClient(IEndpointRouteBuilder endpoints, string streamPath)
         {
             byte[]? script = null;
-            endpoints.MapGet(streamPath.TrimEnd('/') + "/client.js", async context =>
+            return endpoints.MapGet(streamPath.TrimEnd('/') + "/client.js", async context =>
             {
                 if (script is null)
                 {

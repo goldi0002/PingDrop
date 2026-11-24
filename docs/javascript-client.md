@@ -130,7 +130,21 @@ Browsers close the stream when the page unloads, but calling `close()` explicitl
 
 ## Authentication from the browser
 
-`EventSource` sends cookies on same-origin requests but cannot set custom headers. Cookie auth works unchanged; for bearer tokens see [Authentication](authentication.md#jwt-bearer-authentication). For cross-origin use you need CORS configured on your app and `new EventSource(url, { withCredentials: true })` for cookies.
+`EventSource` sends cookies on same-origin requests but cannot set custom headers. Cookie auth works unchanged; for bearer tokens see [Authentication](authentication.md#jwt-bearer-authentication). For cross-origin use see below.
+
+### Cross-origin use
+
+Configure CORS on the PingDrop app (`PingDropOptions.AllowedOrigins` or `CorsPolicy`, plus `app.UseCors()`; see [Configuration](configuration.md#cross-origin-use-cors)), then connect with an absolute URL:
+
+```js
+const es = new EventSource("https://api.example.com/pingdrop/stream", { withCredentials: true });
+// or: new PingDropClient({ url: "https://api.example.com/pingdrop/stream", withCredentials: true })
+```
+
+- `withCredentials: true` is needed for cookies to be sent cross-origin. The server must then answer with `Access-Control-Allow-Credentials: true` and your exact origin (never `*`); `AllowedOrigins` does this.
+- Cookies must also be sent cross-site: set `SameSite=None; Secure` on the auth cookie if the two origins are different sites.
+- The first request is a simple GET and needs no preflight. When the browser reconnects it adds a `Last-Event-ID` header, which triggers a preflight; the CORS policy must allow that header (the built-in `AllowedOrigins` policy does), otherwise reconnects and replay fail with a CORS error.
+- The bundled script can be loaded from the API origin with a plain `<script src="https://api.example.com/pingdrop/stream/client.js">` (script tags need no CORS); the CORS policy also covers `client.js` for `fetch` or `type="module"` loads.
 
 ## Connection limits
 

@@ -63,10 +63,13 @@ builder.Services.AddPingDrop(o =>
 | `ClientRetryInterval` | 3 s | Reconnect delay hint sent to clients as SSE `retry:` (zero omits) |
 | `EventHistorySize` | `50` | Recent events kept in memory for the dashboard and for `Last-Event-ID` replay |
 | `EnableReplay` | `true` | Replay retained events a reconnecting client missed (`Last-Event-ID` header or `lastEventId` query) |
+| `AllowedOrigins` | `null` | Exact origins allowed to use the stream cross-origin (needs `app.UseCors()`); see the configuration docs |
+| `CorsPolicy` | `null` | Name of your own CORS policy applied to the stream and `client.js` (never the dashboard) |
 | `EnableDashboard` | `true` | Serve the built-in dashboard |
 | `Dashboard.Title` | `PingDrop Dashboard` | Dashboard title |
 | `Dashboard.AuthorizationPolicy` | `null` | Authorization policy required for every dashboard route |
 | `Dashboard.AllowAnonymous` | `false` | Allow the dashboard without a policy outside Development |
+| `Dashboard.PathOverride` | `null` | Custom dashboard route (for example `/admin/pingdrop`) instead of `<EndpointPath>/dashboard` |
 | `ClientConnected` / `ClientDisconnected` | `null` | Async callbacks receiving the connection id |
 | `TargetKeyResolver` | `null` | Resolves the subscriber key from `HttpContext` |
 

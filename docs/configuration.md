@@ -18,6 +18,8 @@ The delegate runs once, when `AddPingDrop` is called. Options are read from the 
 |---|---|---|---|
 | `EndpointPath` | `string` | `/pingdrop/stream` | Path of the SSE endpoint. The dashboard lives under `<EndpointPath>/dashboard`. |
 | `AuthorizationPolicy` | `string?` | `null` | Name of an authorization policy required to connect to the SSE endpoint. `null` means the endpoint is anonymous. |
+| `CorsPolicy` | `string?` | `null` | Name of a CORS policy you registered with `AddCors`, applied to the SSE endpoint and `client.js` (never the dashboard). See [Cross-origin use](#cross-origin-use-cors). |
+| `AllowedOrigins` | `string[]?` | `null` | Exact origins allowed to use the stream cross-origin; registers a ready-made policy. Cannot be combined with `CorsPolicy`. See [Cross-origin use](#cross-origin-use-cors). |
 | `HeartbeatInterval` | `TimeSpan` | 15 seconds | How often a `: ping` comment is written to an idle connection, so proxies and load balancers do not close it and dead peers are noticed. Zero or negative disables heartbeats. |
 | `ClientRetryInterval` | `TimeSpan` | 3 seconds | Reconnect delay suggested to clients with an SSE `retry:` field, sent once when a stream opens. Zero or negative omits the hint (the client uses its own default). |
 | `EventHistorySize` | `int` | `50` | Number of recent events kept in memory. Feeds the dashboard and bounds how many missed events can be replayed to a reconnecting client. |
@@ -33,6 +35,44 @@ The delegate runs once, when `AddPingDrop` is called. Options are read from the 
 ### `AuthorizationPolicy`
 
 The policy must be defined with `AddAuthorization`, and the pipeline must run authentication and authorization before the endpoint, otherwise requests fail. See [Authentication](authentication.md).
+
+### Cross-origin use (CORS)
+
+By default the stream is same-origin only. To let a page on another origin (`https://app.example.com` talking to `https://api.example.com`) use `EventSource`, either let PingDrop register a policy for exact origins:
+
+```csharp
+builder.Services.AddPingDrop(o => o.AllowedOrigins = ["https://app.example.com"]);
+```
+
+or register your own policy and name it (use this for anything beyond exact origins, such as extra headers):
+
+```csharp
+builder.Services.AddCors(c => c.AddPolicy("PingDropClients", p => p
+    .WithOrigins("https://app.example.com")
+    .WithMethods("GET")
+    .WithHeaders("Last-Event-ID")      // see below
+    .AllowCredentials()));              // only if the page uses withCredentials
+builder.Services.AddPingDrop(o => o.CorsPolicy = "PingDropClients");
+```
+
+Either way the app must add the standard CORS middleware, in this order:
+
+```csharp
+app.UseRouting();
+app.UseCors();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapPingDrop();
+```
+
+Notes:
+
+- The policy is attached as endpoint metadata (`RequireCors`) to the SSE endpoint and to the bundled `client.js` route only. A request without an `Origin` header (same-origin, curl) is unaffected.
+- `AllowedOrigins` registers a policy named `PingDrop`: `GET` only, the `Last-Event-ID` request header, credentials allowed, and the matching origin echoed (never `*`). Wildcards and blank entries throw at startup. Setting both `AllowedOrigins` and `CorsPolicy` throws.
+- A plain `EventSource` GET is a simple request and needs no preflight. When the browser **reconnects** it adds a `Last-Event-ID` header, which is not a CORS-safelisted header, so the browser sends a preflight `OPTIONS` first. Your own policy must therefore allow the `Last-Event-ID` request header (`WithHeaders("Last-Event-ID")` or `AllowAnyHeader()`); otherwise reconnects fail cross-origin and replay does not work. No `Access-Control-Expose-Headers` is needed.
+- With `withCredentials: true` the response must carry `Access-Control-Allow-Credentials: true` and a specific `Access-Control-Allow-Origin`, so the policy needs `AllowCredentials()` and explicit origins. `AllowAnyOrigin()` cannot be combined with credentials. Allowing credentials lets the listed origin read authenticated streams, so list only origins you trust.
+- The dashboard routes never get the PingDrop policy, and when `CorsPolicy`/`AllowedOrigins` is set they also opt out of any default CORS policy, because the dashboard can send notifications and must stay same-origin. If you do not use these options and instead apply a global default policy with `UseCors()`, it applies to the dashboard as well.
+- Authorization still applies: the CORS middleware runs before it, and a preflight carries no credentials, so it is answered by the CORS middleware before authentication.
 
 ### `HeartbeatInterval`
 
@@ -83,7 +123,8 @@ The id is a process-local `long` (it is the same id the dashboard shows). It is 
 | `AuthorizationPolicy` | `string?` | `null` | Policy required for every dashboard route (page, assets, API, live feed), including sending notifications. |
 | `AllowAnonymous` | `bool` | `false` | Allows mapping the dashboard with no policy outside Development. Trusted networks only. |
 | `LogEachDispatch` | `bool` | `false` | Also publish a live-log line for every event dispatched to a client. Connect and disconnect lines are always shown while a dashboard is open. Live logs and metric pushes are skipped entirely when the dashboard is disabled or no dashboard feed is connected. |
-| `Path` | `string` (read-only) | `<EndpointPath>/dashboard` | The dashboard's base path. Derived from `EndpointPath`; you cannot set it separately. |
+| `PathOverride` | `string?` | `null` | Custom dashboard route such as `/admin/pingdrop`, replacing the default. A leading slash is added and trailing slashes are removed; `null`, empty or `/` keeps the default. The old default path is then not mapped (404). |
+| `Path` | `string` (read-only) | `<EndpointPath>/dashboard` | The effective dashboard path: `PathOverride` when set, otherwise derived from `EndpointPath`. Does not include the app's `PathBase`. |
 
 When `Dashboard.AuthorizationPolicy` is `null` and `AllowAnonymous` is `false`, the dashboard is mapped only if the host environment is Development. In any other environment it is skipped and a warning is logged at startup. See [Authentication](authentication.md#securing-the-dashboard).
 
