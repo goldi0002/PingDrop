@@ -7,7 +7,8 @@ namespace PingDrop.Internal
     {
         private readonly ConcurrentDictionary<long, PDClientConnection> _all = new();
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<long, PDClientConnection>> _byKey = new();
-        public int Count => _all.Count;
+        // Dashboard feed connections are internal and excluded from Count and GetAll; reach them via GetByKey.
+        public int Count => _all.Values.Count(c => !c.IsDashboard);
         public int CountByKey(string subscriberKey)
         {
             return _byKey.TryGetValue(subscriberKey, out var bucket)
@@ -34,7 +35,7 @@ namespace PingDrop.Internal
 
         public IEnumerable<PDClientConnection> GetAll()
         {
-            return _all.Values;
+            return _all.Values.Where(c => !c.IsDashboard);
         }
 
         public IEnumerable<PDClientConnection> GetByKey(string subscriberKey)

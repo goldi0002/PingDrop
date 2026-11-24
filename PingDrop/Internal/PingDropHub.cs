@@ -63,6 +63,11 @@ namespace PingDrop.Internal
             ArgumentNullException.ThrowIfNull(notification);
             cancellationToken.ThrowIfCancellationRequested();
 
+            if (targetKey == InternalConstants.DashboardSubscriberKey)
+            {
+                return ValueTask.CompletedTask;
+            }
+
             int clientCount = _connectionStore.CountByKey(targetKey);
 
             if (clientCount == 0)
@@ -100,7 +105,7 @@ namespace PingDrop.Internal
                 throw new ArgumentException("At least one non-blank target key is required.", nameof(targetKeys));
             }
 
-            List<PDClientConnection> clients = keys.SelectMany(_connectionStore.GetByKey).Distinct().ToList();
+            List<PDClientConnection> clients = keys.Where(k => k != InternalConstants.DashboardSubscriberKey).SelectMany(_connectionStore.GetByKey).Distinct().ToList();
 
             if (clients.Count == 0)
             {
