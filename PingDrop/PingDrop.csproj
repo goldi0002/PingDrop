@@ -40,6 +40,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<EmbeddedResource Include="Dashboard\**\*"></EmbeddedResource>
+		<!-- Single source of truth lives in clients/js; served at <EndpointPath>/client.js -->
+		<EmbeddedResource Include="..\clients\js\pingdrop.js" LogicalName="PingDrop.Client.pingdrop.js" />
 	</ItemGroup>
 	<ItemGroup>
 		<None Include="icon.png" Pack="true" PackagePath="\"></None>

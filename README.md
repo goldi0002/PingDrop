@@ -56,7 +56,7 @@ To send to one user instead of everyone, identify subscribers with `TargetKeyRes
 | [Configuration](docs/configuration.md) | Every `PingDropOptions` and dashboard option, with defaults |
 | [Authentication](docs/authentication.md) | Cookie and JWT setups, claims-based keys, securing the dashboard |
 | [Reverse proxy](docs/reverse-proxy.md) | nginx, IIS/ARR, Azure, Cloudflare; heartbeats and timeouts |
-| [JavaScript client](docs/javascript-client.md) | `EventSource` usage, event filtering, reconnects |
+| [JavaScript client](docs/javascript-client.md) | Bundled client (`/pingdrop/stream/client.js`), `EventSource` usage, event filtering, reconnects |
 | [Dashboard](docs/dashboard.md) | Routes, the send-notification API, security |
 | [Limitations](docs/limitations.md) | Single node, in-memory, no replay, queue behaviour |
 
