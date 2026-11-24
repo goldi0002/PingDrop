@@ -1,15 +1,21 @@
 ﻿using PingDrop.Abstractions;
 using PingDrop.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Diagnostics;
 
 namespace PingDrop.Internal
 {
-    internal sealed class PingDropHub(IPDConnectionStore connections, IEventHistoryStore eventHistoryStore, INotificationFactory notificationFactory) : IPingDropService
+    internal sealed class PingDropHub(IPDConnectionStore connections, IEventHistoryStore eventHistoryStore, INotificationFactory notificationFactory, ILoggerFactory? loggerFactory = null) : IPingDropService
     {
         private static readonly ActivitySource _activitySource = new(InternalConstants.ActivitySourceName, InternalConstants.ActivityVersion);
         private readonly IPDConnectionStore _connectionStore = connections;
         private readonly IEventHistoryStore _eventHistoryStore = eventHistoryStore;
         private readonly INotificationFactory _notificationFactory = notificationFactory;
+
+        private readonly ILogger _logger = loggerFactory?.CreateLogger(PDLog.Category) ?? NullLogger.Instance;
+        private long _lastDropWarningTicks;
+        private long _suppressedDropWarnings;
 
         private long _totalEventsPublished;
         private long _attemptedDeliveries;
@@ -119,8 +125,30 @@ namespace PingDrop.Internal
             if (dropped > 0)
             {
                 Interlocked.Add(ref _droppedDeliveries, dropped);
+                WarnDropped(dropped, attempted, eventType);
             }
         }
+
+        // One aggregate warning per delivery, rate-limited to one per 10 seconds so a stuck client cannot flood the log.
+        private void WarnDropped(int dropped, int attempted, string eventType)
+        {
+            if (!_logger.IsEnabled(LogLevel.Warning))
+            {
+                return;
+            }
+
+            long now = Environment.TickCount64;
+            long last = Interlocked.Read(ref _lastDropWarningTicks);
+
+            if ((last != 0 && now - last < 10_000) || Interlocked.CompareExchange(ref _lastDropWarningTicks, now, last) != last)
+            {
+                Interlocked.Increment(ref _suppressedDropWarnings);
+                return;
+            }
+
+            PDLog.DeliveriesDropped(_logger, dropped, attempted, eventType, Interlocked.Exchange(ref _suppressedDropWarnings, 0));
+        }
+
         public PDHubMetrics GetMetrics()
         {
             return new PDHubMetrics(ConnectedClientsCount, Interlocked.Read(ref _attemptedDeliveries), Interlocked.Read(ref _successfulDeliveries), Interlocked.Read(ref _droppedDeliveries));
