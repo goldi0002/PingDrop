@@ -5,13 +5,16 @@ using System.Diagnostics;
 
 namespace PingDrop.Internal
 {
-    internal sealed class PDEventPublisher(IPDConnectionStore connectionStore, IEventHistoryStore eventHistoryStore,INotificationFactory notificationFactory, ActivitySource activitySource, ILoggerFactory? loggerFactory = null) : IEventPublisher
+    internal sealed class PDEventPublisher(IPDConnectionStore connectionStore, IEventHistoryStore eventHistoryStore,INotificationFactory notificationFactory, ActivitySource activitySource, PingDropOptions options, ILoggerFactory? loggerFactory = null) : IEventPublisher
     {
         private readonly ILogger _logger = loggerFactory?.CreateLogger(PDLog.Category) ?? NullLogger.Instance;
         private readonly ActivitySource _activitySource = activitySource;
         private readonly IPDConnectionStore _connectionStore = connectionStore;
         private readonly IEventHistoryStore _eventHistoryStore = eventHistoryStore;
         private readonly INotificationFactory _notificationFactory = notificationFactory;
+
+        /// <inheritdoc />
+        public bool IsActive => options.EnableDashboard && _connectionStore.CountByKey(InternalConstants.DashboardSubscriberKey) > 0;
 
         public ValueTask PublishAsync<T>(T notification, string eventType = "message", CancellationToken cancellationToken = default)
         {

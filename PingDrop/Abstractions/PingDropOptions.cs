@@ -156,6 +156,15 @@ namespace PingDrop.Abstractions
         /// <remarks>The dashboard can send notifications to any client, so enable this only on a trusted network.</remarks>
         public bool AllowAnonymous { get; set; }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether a live-log line is published to the dashboard for every event
+        /// dispatched to a client. Defaults to <see langword="false"/>.
+        /// </summary>
+        /// <remarks>Connect and disconnect lines are always published while a dashboard feed is open. Per-dispatch
+        /// lines are the noisiest, so they are off by default. Nothing is built or serialized when the dashboard is
+        /// disabled or no dashboard feed is connected.</remarks>
+        public bool LogEachDispatch { get; set; }
+
         internal string EndpointPath { get; set; } = InternalConstants.DefaultEndpointPath;
         /// <summary>
         /// Gets the full path to the dashboard endpoint.

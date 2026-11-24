@@ -35,6 +35,10 @@ The dashboard can push arbitrary payloads to any connected user and shows all su
 
 To remove it entirely, set `EnableDashboard = false`.
 
+## Live log
+
+The dashboard's log view shows client connect and disconnect lines. Per-dispatch lines ("Event dispatched to client ...") are off by default because they are noisy; set `Dashboard.LogEachDispatch = true` to include them. Live-log lines and metric pushes are only built when the dashboard is enabled and a dashboard feed is connected, so an unwatched dashboard adds no cost to delivery.
+
 The dashboard's own live feed connects with a reserved subscriber key (`__pingdrop_dashboard__`). Sending a notification to that key through the dashboard API is rejected with `403`. The dashboard connection counts as a connection in the connection store, and broadcasts are also delivered to it.
 
 ## Sending from the dashboard
