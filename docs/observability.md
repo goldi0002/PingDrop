@@ -21,7 +21,7 @@ All instruments are observable: values are read from the hub's existing counters
 
 | Instrument | Type | Unit | Description |
 |---|---|---|---|
-| `pingdrop.clients.connected` | ObservableUpDownCounter&lt;int&gt; | `{client}` | SSE clients currently connected. Includes the dashboard's own feed while it is open. |
+| `pingdrop.clients.connected` | ObservableUpDownCounter&lt;int&gt; | `{client}` | SSE clients currently connected. The dashboard's own live feed is not counted. |
 | `pingdrop.events.published` | ObservableCounter&lt;long&gt; | `{event}` | Events published to at least one connected client. Sends with no matching client are not counted. |
 | `pingdrop.deliveries.attempted` | ObservableCounter&lt;long&gt; | `{delivery}` | Per-client delivery attempts. Clients that filtered out the event type are not counted. |
 | `pingdrop.deliveries.succeeded` | ObservableCounter&lt;long&gt; | `{delivery}` | Deliveries accepted into a client's queue. |
