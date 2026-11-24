@@ -58,6 +58,7 @@ To send to one user instead of everyone, identify subscribers with `TargetKeyRes
 | [Reverse proxy](docs/reverse-proxy.md) | nginx, IIS/ARR, Azure, Cloudflare; heartbeats and timeouts |
 | [JavaScript client](docs/javascript-client.md) | `EventSource` usage, event filtering, reconnects |
 | [Dashboard](docs/dashboard.md) | Routes, the send-notification API, security |
+| [Observability](docs/observability.md) | OpenTelemetry meter and activity source, instrument list |
 | [Limitations](docs/limitations.md) | Single node, in-memory, no replay, queue behaviour |
 
 ## License

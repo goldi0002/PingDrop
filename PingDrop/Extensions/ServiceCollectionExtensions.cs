@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using PingDrop.Abstractions;
 using PingDrop.Internal;
 
@@ -37,6 +38,8 @@ namespace PingDrop.Extensions
             services.AddSingleton<IEventHistoryStore, PDEventHistoryStore>(sp => new PDEventHistoryStore(options.EventHistorySize));
             services.AddSingleton<PingDropHub>();
             services.AddSingleton<IPingDropService>(sp => sp.GetRequiredService<PingDropHub>());
+            services.AddSingleton<PingDropMetrics>();
+            services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<PingDropMetrics>());
             services.AddSingleton<IEventPublisher, PDEventPublisher>();
             services.AddSingleton<IDashboardService, DashboardService>();
 
