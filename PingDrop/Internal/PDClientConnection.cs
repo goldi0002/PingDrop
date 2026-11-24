@@ -13,6 +13,13 @@ namespace PingDrop.Internal
         private DateTime _lastActivityAtUtc;
         private static long _nextConnectionId;
 
+        /// <summary>Maximum number of undelivered notifications queued per client before the oldest is dropped.</summary>
+        internal const int QueueCapacity = 20;
+
+        // The itemDropped callback runs synchronously on the writing thread, so a thread-static tally lets a write report its own overflow.
+        [ThreadStatic]
+        private static int _overflowOnCurrentWrite;
+
         public long ConnectionId { get; } = Interlocked.Increment(ref _nextConnectionId);
 
         public string? SubscriberKey { get; }
@@ -52,12 +59,12 @@ namespace PingDrop.Internal
             ConnectedAtUtc = DateTime.UtcNow;
             _lastActivityAtUtc = ConnectedAtUtc;
 
-            NotificationChannel = Channel.CreateBounded<PDNotification>(new BoundedChannelOptions(20)
+            NotificationChannel = Channel.CreateBounded<PDNotification>(new BoundedChannelOptions(QueueCapacity)
             {
                 SingleReader = true,
                 SingleWriter = false,
                 FullMode = BoundedChannelFullMode.DropOldest
-            });
+            }, OnItemDropped);
         }
 
         public async Task WriteNotificationAsync(PDNotification notification, CancellationToken cancellationToken = default)
@@ -69,14 +76,32 @@ namespace PingDrop.Internal
             Touch();
         }
 
+        // With DropOldest, TryWrite always succeeds, so overflow is only observable through this callback.
+        private void OnItemDropped(PDNotification _)
+        {
+            Interlocked.Increment(ref _notificationsDropped);
+            _overflowOnCurrentWrite++;
+        }
+
         public bool TryWriteNotification(PDNotification notification)
         {
+            return TryWriteNotification(notification, out _);
+        }
+
+        /// <summary>Queues a notification; <paramref name="overflowDropped"/> is the number of older queued notifications evicted to make room.</summary>
+        public bool TryWriteNotification(PDNotification notification, out int overflowDropped)
+        {
+            overflowDropped = 0;
+
             if (IsDisposed)
             {
                 return false;
             }
 
+            _overflowOnCurrentWrite = 0;
             bool written = NotificationChannel.Writer.TryWrite(notification);
+            overflowDropped = _overflowOnCurrentWrite;
+            _overflowOnCurrentWrite = 0;
 
             if (written)
             {

@@ -40,6 +40,34 @@ public class PDClientConnectionTests
     }
 
     [Fact]
+    public void Overflow_IsCountedAsDropped_AndLatestEventsRetained()
+    {
+        var c = new PDClientConnection(null);
+        int total = PDClientConnection.QueueCapacity + 7;
+
+        for (long i = 1; i <= total; i++)
+            c.TryWriteNotification(N(i));
+
+        Assert.Equal(7, c.NotificationsDropped);
+
+        var ids = new List<long>();
+        while (c.NotificationChannel.Reader.TryRead(out var n))
+            ids.Add(n.Id);
+        Assert.Equal(Enumerable.Range(8, PDClientConnection.QueueCapacity).Select(i => (long)i), ids);
+    }
+
+    [Fact]
+    public void NoOverflow_NothingDropped()
+    {
+        var c = new PDClientConnection(null);
+
+        for (long i = 1; i <= PDClientConnection.QueueCapacity; i++)
+            c.TryWriteNotification(N(i));
+
+        Assert.Equal(0, c.NotificationsDropped);
+    }
+
+    [Fact]
     public async Task Dispose_CompletesChannel_AndRejectsWrites()
     {
         var c = new PDClientConnection(null);
