@@ -133,7 +133,8 @@ namespace PingDrop.Extensions
                 }
             }
 
-            await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Client connected: {client.ConnectionId}", DateTime.UtcNow.ToString("O")), "log", context.RequestAborted);
+            if (eventPublisher.IsActive)
+                await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Client connected: {client.ConnectionId}", DateTime.UtcNow.ToString("O")), "log", context.RequestAborted);
 
             try
             {
@@ -147,7 +148,8 @@ namespace PingDrop.Extensions
                         try
                         {
                             await PDSseWriter.WriteAsync(context.Response, evt, context.RequestAborted);
-                            await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Event dispatched to client {client.ConnectionId}: {evt.EventType}", DateTime.UtcNow.ToString("O")), "log", context.RequestAborted);
+                            if (options.Dashboard.LogEachDispatch && eventPublisher.IsActive)
+                                await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Event dispatched to client {client.ConnectionId}: {evt.EventType}", DateTime.UtcNow.ToString("O")), "log", context.RequestAborted);
                             hub.IncrementSuccessfulDispatches();
                             client.MarkDelivered();
                         }
@@ -170,7 +172,8 @@ namespace PingDrop.Extensions
                 PDLog.ClientDisconnected(logger, client.ConnectionId);
                 try
                 {
-                    await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Client disconnected: {client.ConnectionId}", DateTime.UtcNow.ToString("O")), "log", CancellationToken.None);
+                    if (eventPublisher.IsActive)
+                        await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Client disconnected: {client.ConnectionId}", DateTime.UtcNow.ToString("O")), "log", CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -457,7 +460,8 @@ namespace PingDrop.Extensions
                         context.RequestAborted);
                     return;
                 }
-                await _pub.PublishAsync(JsonSerializer.Serialize(ApiResponse<IReadOnlyCollection<PDMetrics>>.Success(GetCombinedMetrics(hub, _dashboardService)), _jsonOptions), "metrics", CancellationToken.None);
+                if (_pub.IsActive)
+                    await _pub.PublishAsync(JsonSerializer.Serialize(ApiResponse<IReadOnlyCollection<PDMetrics>>.Success(GetCombinedMetrics(hub, _dashboardService)), _jsonOptions), "metrics", CancellationToken.None);
                 await context.Response.WriteAsJsonAsync(ApiResponse<object>.Success(new { }, "Notification sent successfully"), _jsonOptions, context.RequestAborted);
             });
 

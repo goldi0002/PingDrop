@@ -36,7 +36,8 @@ public sealed class PingDropHost : IAsyncDisposable
         Action<PingDropOptions>? configure = null,
         string environment = "Development",
         bool withAuth = false,
-        Action<ILoggingBuilder>? configureLogging = null)
+        Action<ILoggingBuilder>? configureLogging = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         PingDropHost? host = null;
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
@@ -54,6 +55,7 @@ public sealed class PingDropHost : IAsyncDisposable
             o.ClientDisconnected = id => { lock (host!.Disconnected) host.Disconnected.Add(id); return Task.CompletedTask; };
             configure?.Invoke(o);
         });
+        configureServices?.Invoke(builder.Services);
         var app = builder.Build();
         if (withAuth)
         {
