@@ -1,4 +1,5 @@
-﻿using PingDrop.Abstractions;
+﻿using Microsoft.Extensions.Logging;
+using PingDrop.Abstractions;
 using PingDrop.Internal;
 
 namespace PingDrop.Tests.Unit;
@@ -205,5 +206,25 @@ public class PingDropHubTests
 
         Assert.Equal(3, a.PendingNotifications);
         Assert.All(history.GetAll(), e => Assert.Equal("u1", e.TargetKey));
+    }
+
+    [Fact]
+    public async Task DroppedDeliveries_AreLoggedOnceAsWarning_Aggregated()
+    {
+        var logs = new LogCollector();
+        var store = new PDConnectionStore();
+        var hub = new PingDropHub(store, new PDEventHistoryStore(10), new NotificationFactory(), LoggerFactory.Create(b => b.AddProvider(logs)));
+        var a = store.Add(null);
+        var b = store.Add(null);
+        await a.DisposeAsync();
+        await b.DisposeAsync();
+
+        await hub.BroadcastAsync("x", "evt");
+        await hub.BroadcastAsync("y", "evt");
+
+        var warn = Assert.Single(logs.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Equal("PingDrop", warn.Category);
+        Assert.Contains("Dropped 2 of 2", warn.Message);
+        Assert.Equal(4, hub.DroppedDeliveries);
     }
 }

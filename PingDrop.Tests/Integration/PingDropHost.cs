@@ -34,7 +34,8 @@ public sealed class PingDropHost : IAsyncDisposable
     public static async Task<PingDropHost> StartAsync(
         Action<PingDropOptions>? configure = null,
         string environment = "Development",
-        bool withAuth = false)
+        bool withAuth = false,
+        Action<ILoggingBuilder>? configureLogging = null)
     {
         PingDropHost? host = null;
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
@@ -43,6 +44,7 @@ public sealed class PingDropHost : IAsyncDisposable
             builder.Services.AddAuthentication(TestAuthHandler.Scheme).AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.Scheme, _ => { });
             builder.Services.AddAuthorization(o => o.AddPolicy("Admin", p => p.RequireClaim("role", "admin")));
         }
+        if (configureLogging is not null) configureLogging(builder.Logging);
         builder.WebHost.UseTestServer();
         builder.Services.AddPingDrop(o =>
         {

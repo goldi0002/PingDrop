@@ -106,13 +106,15 @@ namespace PingDrop.Extensions
             response.Headers.Append("X-Content-Type-Options", "nosniff");
         }
 
-        private static async Task HandleSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options, IEventPublisher eventPublisher)
+        private static async Task HandleSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options, IEventPublisher eventPublisher, ILoggerFactory loggerFactory)
         {
+            ILogger logger = loggerFactory.CreateLogger(PDLog.Category);
             AddSseHeaders(context.Response);
 
             HashSet<string>? events = ParseEvents(context.Request.Query[InternalConstants.DefaultQueryEventTypeParam]);
             string? subscriberKey = options.TargetKeyResolver?.Invoke(context);
             await using PDClientConnection client = hub.AddClient(events, subscriberKey);
+            PDLog.ClientConnected(logger, client.ConnectionId, subscriberKey);
 
             if (options.ClientConnected is not null)
             {
@@ -120,9 +122,9 @@ namespace PingDrop.Extensions
                 {
                     await options.ClientConnected(client.ConnectionId);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-
+                    PDLog.ClientConnectedCallbackFailed(logger, client.ConnectionId, ex);
                 }
             }
 
@@ -160,13 +162,14 @@ namespace PingDrop.Extensions
             finally
             {
                 hub.RemoveClient(client.ConnectionId);
+                PDLog.ClientDisconnected(logger, client.ConnectionId);
                 try
                 {
                     await eventPublisher.PublishAsync(new PDLiveLogs("info", $"Client disconnected: {client.ConnectionId}", DateTime.UtcNow.ToString("O")), "log", CancellationToken.None);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-
+                    PDLog.LiveLogPublishFailed(logger, ex);
                 }
 
                 if (options.ClientDisconnected is not null)
@@ -175,9 +178,9 @@ namespace PingDrop.Extensions
                     {
                         await options.ClientDisconnected(client.ConnectionId);
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
-
+                        PDLog.ClientDisconnectedCallbackFailed(logger, client.ConnectionId, ex);
                     }
                 }
             }
@@ -354,8 +357,9 @@ namespace PingDrop.Extensions
                     var connections = _dashboardService.GetConnections(statusFilter, searchText);
                     await context.Response.WriteAsJsonAsync(ApiResponse<IReadOnlyCollection<PDDashboardModel.ConnectionInfo>>.Success(connections), _jsonOptions, context.RequestAborted);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    PDLog.DashboardConnectionsFailed(context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(PDLog.Category), ex);
                     context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                     await context.Response.WriteAsJsonAsync(ApiResponse<IReadOnlyCollection<PDDashboardModel.ConnectionInfo>>.Failure("Failed to retrieve connections"), _jsonOptions, context.RequestAborted);
                 }
