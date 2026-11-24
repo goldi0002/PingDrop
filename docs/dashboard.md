@@ -27,7 +27,17 @@ The dashboard path is `<EndpointPath>/dashboard`. With the defaults:
 | `/pingdrop/stream/dashboard/send-notification` | POST | Send a notification (JSON body) |
 | `/pingdrop/stream/dashboard/sse` | GET | The dashboard's own live feed (SSE) |
 
-If you change `EndpointPath`, the dashboard moves with it. The dashboard title is `Dashboard.Title`.
+If you change `EndpointPath`, the dashboard moves with it. To put it somewhere else entirely, set `Dashboard.PathOverride`, for example `o.Dashboard.PathOverride = "/admin/pingdrop"`; every route in the table then lives under that path and the default path is not mapped. The dashboard title is `Dashboard.Title`.
+
+### Under a path base
+
+Routes are relative to the application's `PathBase`. When the app runs under `app.UsePathBase("/app")` (or behind a reverse proxy that adds a prefix; see [Reverse proxy](reverse-proxy.md#hosting-under-a-path-prefix)), the page is served with the base path included in its script, stylesheet and API URLs, so `/app/pingdrop/stream/dashboard` works, including its live feed. Nothing needs to be configured for this.
+
+### Offline
+
+The page has no external dependencies: no CDN scripts, stylesheets, fonts or icon fonts. Icons are inline SVG in the embedded stylesheet, so the dashboard works on networks without internet access and under a strict `Content-Security-Policy` that allows only `'self'` (the page does use one inline `<script>` that sets its base URL, and inline `style` attributes).
+
+The dashboard is never given a CORS policy by PingDrop; it is same-origin only.
 
 ## Security
 

@@ -27,6 +27,32 @@ namespace PingDrop.Abstractions
         public string? AuthorizationPolicy { get; set; }
 
         /// <summary>
+        /// Gets or sets the name of a CORS policy (registered by the application with <c>AddCors</c>) applied to the SSE
+        /// endpoint and the bundled <c>client.js</c> route, so pages on other origins can use <c>EventSource</c>.
+        /// When <see langword="null"/> (and <see cref="AllowedOrigins"/> is empty) no CORS metadata is added.
+        /// </summary>
+        /// <remarks>The application must call <c>UseCors()</c> after <c>UseRouting</c> and before
+        /// <c>UseAuthentication</c>/<c>UseAuthorization</c> and <c>MapPingDrop</c>. The policy must allow the
+        /// <c>Last-Event-ID</c> request header, which the browser adds when it reconnects (a non-simple header, so it triggers a
+        /// preflight). With <c>withCredentials</c> the policy must also call <c>AllowCredentials()</c> and name explicit origins.
+        /// The dashboard routes never receive this policy. Cannot be combined with <see cref="AllowedOrigins"/>.</remarks>
+        public string? CorsPolicy { get; set; }
+
+        /// <summary>
+        /// Gets or sets exact origins (for example <c>https://app.example.com</c>) that may use the SSE endpoint and
+        /// <c>client.js</c> cross-origin. A convenience that registers a ready-made CORS policy: <c>GET</c> only, the
+        /// <c>Last-Event-ID</c> header, and credentials allowed (the matching origin is echoed, never <c>*</c>).
+        /// </summary>
+        /// <remarks>The application must still call <c>UseCors()</c> (see <see cref="CorsPolicy"/> for the order).
+        /// Wildcards are rejected. For anything else, register your own policy and set <see cref="CorsPolicy"/>.</remarks>
+        public string[]? AllowedOrigins { get; set; }
+
+        internal const string BuiltInCorsPolicyName = "PingDrop";
+
+        internal string? EffectiveCorsPolicy => !string.IsNullOrWhiteSpace(CorsPolicy) ? CorsPolicy
+            : AllowedOrigins is { Length: > 0 } ? BuiltInCorsPolicyName : null;
+
+        /// <summary>
         /// Gets or sets how often a <c>: ping</c> comment is written to idle SSE connections so that proxies and load
         /// balancers do not close them and dead peers are detected. Defaults to 15 seconds.
         /// </summary>
@@ -276,9 +302,26 @@ namespace PingDrop.Abstractions
         }
 
         internal string EndpointPath { get; set; } = InternalConstants.DefaultEndpointPath;
+
         /// <summary>
-        /// Gets the full path to the dashboard endpoint.
+        /// Gets or sets a custom route for the dashboard (for example <c>/admin/pingdrop</c>) that replaces the default
+        /// <c>{EndpointPath}/dashboard</c>. A leading slash is added and trailing slashes are removed; <see langword="null"/>,
+        /// empty or <c>/</c> keeps the default.
         /// </summary>
-        public string Path => $"{EndpointPath}/dashboard";
+        /// <remarks>Relative to the application's <c>PathBase</c>, like every other route.</remarks>
+        public string? PathOverride { get; set; }
+
+        /// <summary>
+        /// Gets the effective path of the dashboard endpoint: <see cref="PathOverride"/> when set, otherwise
+        /// <c>{EndpointPath}/dashboard</c>. It does not include the application's <c>PathBase</c>.
+        /// </summary>
+        public string Path
+        {
+            get
+            {
+                string custom = (PathOverride ?? string.Empty).Trim().Trim('/');
+                return custom.Length > 0 ? "/" + custom : $"{EndpointPath}/dashboard";
+            }
+        }
     }
 }

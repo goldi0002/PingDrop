@@ -37,7 +37,8 @@ public sealed class PingDropHost : IAsyncDisposable
         string environment = "Development",
         bool withAuth = false,
         Action<ILoggingBuilder>? configureLogging = null,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        Action<WebApplication>? configureApp = null)
     {
         PingDropHost? host = null;
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
@@ -57,6 +58,8 @@ public sealed class PingDropHost : IAsyncDisposable
         });
         configureServices?.Invoke(builder.Services);
         var app = builder.Build();
+        // Runs first in the pipeline (UsePathBase / UseRouting / UseCors), before authentication and MapPingDrop.
+        configureApp?.Invoke(app);
         if (withAuth)
         {
             app.UseAuthentication();

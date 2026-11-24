@@ -102,6 +102,15 @@ Cloudflare proxies `text/event-stream` responses through without caching them, b
 - **Traefik, HAProxy, Envoy:** disable response buffering for the path if the proxy has such a feature, and set idle/stream timeouts above the heartbeat interval (`timeout tunnel`/`timeout server` in HAProxy, stream idle timeout in Envoy).
 - **Kubernetes ingress-nginx:** use the annotations `nginx.ingress.kubernetes.io/proxy-buffering: "off"` and `nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"`.
 
+## Hosting under a path prefix
+
+If the app is reachable under a prefix (`https://example.com/app/...`), routes are still mapped relative to the app, and the prefix is the app's `PathBase`.
+
+- Either the proxy **strips** the prefix and the app puts it back with `app.UsePathBase("/app")` (call it before `UseRouting`, and call `UseRouting` explicitly after it), or the proxy forwards the prefix and the app's own routing handles it with `UsePathBase`. Either way, PingDrop reads `Request.PathBase`.
+- `X-Forwarded-Prefix` is a convention of some proxies (Traefik, Spring, Istio) and is not applied by ASP.NET Core's `ForwardedHeaders` middleware, which only handles `For`, `Proto` and `Host`. To honour it, set the path base from the header yourself, for example `app.Use((ctx, next) => { if (ctx.Request.Headers.TryGetValue("X-Forwarded-Prefix", out var p) && p.Count > 0) ctx.Request.PathBase = new PathString(p.ToString().TrimEnd('/')); return next(); });` before `UseRouting`, and only accept it from a trusted proxy.
+- The dashboard page is rendered with the path base in all its URLs (script, stylesheet, API calls and its live feed), so it works under the prefix. Pages that use the JavaScript client pass the full URL they want to connect to, for example `new PingDropClient({ url: "/app/pingdrop/stream" })`; the bundled client contains no absolute URLs of its own.
+- In nginx, match the location on the prefix, for example `location /app/pingdrop/stream` (see above), and keep the buffering and timeout settings.
+
 ## Rolling restarts and graceful shutdown
 
 When the host starts stopping (`ApplicationStopping`, for example on SIGTERM or a deployment), PingDrop completes every open stream, the dashboard feed included. Each client's stream ends cleanly, `ClientDisconnected` runs for it, and the host does not wait out the shutdown timeout (30 s by default) for streams that would otherwise stay open. Browsers' `EventSource` then reconnects after `ClientRetryInterval`, which lets the load balancer send them to the next instance.

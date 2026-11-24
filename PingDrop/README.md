@@ -65,12 +65,15 @@ builder.Services.AddPingDrop(o =>
 | `MaxConnectionsPerKey` / `MaxTotalConnections` | `null` | Cap simultaneous connections per subscriber key (HTTP 429) / in total (HTTP 503); both answer with `Retry-After` |
 | `MaxPayloadBytes` | `null` | Largest serialized payload in UTF-8 bytes; larger sends throw `PingDropPayloadTooLargeException` (dashboard: 413) |
 | `EnableReplay` | `true` | Replay retained events a reconnecting client missed (`Last-Event-ID` header or `lastEventId` query) |
+| `AllowedOrigins` | `null` | Exact origins allowed to use the stream cross-origin (needs `app.UseCors()`); see the configuration docs |
+| `CorsPolicy` | `null` | Name of your own CORS policy applied to the stream and `client.js` (never the dashboard) |
 | `EnableDashboard` | `true` | Serve the built-in dashboard |
 | `Dashboard.Title` | `PingDrop Dashboard` | Dashboard title |
 | `Dashboard.AuthorizationPolicy` | `null` | Authorization policy required for every dashboard route |
 | `Dashboard.AllowAnonymous` | `false` | Allow the dashboard without a policy outside Development |
 | `Dashboard.MaxSendsPerMinute` | `null` | Rate limit for the dashboard's send endpoint (429 + `Retry-After`) |
 | `Dashboard.MaxFeedConnections` | `10` | Cap on open dashboard live feeds (503 + `Retry-After`) |
+| `Dashboard.PathOverride` | `null` | Custom dashboard route (for example `/admin/pingdrop`) instead of `<EndpointPath>/dashboard` |
 | `ClientConnected` / `ClientDisconnected` | `null` | Async callbacks receiving the connection id |
 | `TargetKeyResolver` | `null` | Resolves the subscriber key from `HttpContext` |
 
