@@ -1,0 +1,118 @@
+# JavaScript client
+
+PingDrop has no client library. The stream is standard Server-Sent Events, so the browser's built-in [`EventSource`](https://developer.mozilla.org/docs/Web/API/EventSource) is the client.
+
+## Basic usage
+
+```js
+const es = new EventSource("/pingdrop/stream");
+
+es.addEventListener("notification", e => {
+  const data = JSON.parse(e.data);
+  console.log(e.lastEventId, data);
+});
+
+es.onerror = () => console.warn("PingDrop stream interrupted, readyState =", es.readyState);
+```
+
+The path is `PingDropOptions.EndpointPath` (default `/pingdrop/stream`).
+
+## Event names
+
+The `eventType` you pass on the server becomes the SSE `event:` field:
+
+```csharp
+await pingDrop.BroadcastAsync(new { Text = "Hi" }, "notification");   // event: notification
+await pingDrop.BroadcastAsync(new { Text = "Hi" });                    // event: message (the default)
+```
+
+`EventSource` dispatches by event name:
+
+- `eventType` `"message"` (the default): handled by `es.onmessage` or `es.addEventListener("message", ...)`.
+- Any other name: handled **only** by `es.addEventListener("<name>", ...)`. `onmessage` does not fire for named events. This is the most common "I get nothing" mistake.
+
+Each event's `data` is a single line of JSON produced by `System.Text.Json` with default options (property names keep the casing of your C# type; `new { Text = "Hi" }` arrives as `{"Text":"Hi"}`). `e.lastEventId` is the server-assigned numeric event id.
+
+## Filtering by event type
+
+Clients can ask the server to deliver only some event types with the `eventType` query parameter, a comma-separated list:
+
+```js
+const es = new EventSource("/pingdrop/stream?eventType=notification,alert");
+```
+
+- Matching is case-insensitive, and whitespace around names is trimmed.
+- Filtering happens on the server, before the event is queued for that client, so filtered-out events cost the client nothing.
+- If the parameter is missing or empty, the client receives every event type.
+- It applies to the connection for its lifetime. To change the filter, close the `EventSource` and open a new one.
+
+Filtering is not a security boundary; use authorization and per-user keys for that (see [Authentication](authentication.md)).
+
+## Reconnect behaviour
+
+`EventSource` reconnects automatically when the connection drops (server restart, network change, proxy timeout):
+
+- The server suggests the delay with `retry: <ms>` at the start of each stream (`ClientRetryInterval`, default 3000 ms). The browser uses that value for subsequent reconnects of that `EventSource`.
+- `es.readyState` is `CONNECTING (0)` while reconnecting, `OPEN (1)` while connected and `CLOSED (2)` after `es.close()` or a fatal error.
+- Fatal errors are responses that are not `200` with `Content-Type: text/event-stream` (for example 401, 403, 404, a redirect to an HTML login page). The browser does not retry these. Handle them by checking `readyState`:
+
+```js
+es.onerror = () => {
+  if (es.readyState === EventSource.CLOSED) {
+    // fatal: authentication failed, wrong path, etc. Decide whether to re-authenticate and open a new EventSource.
+  }
+  // otherwise the browser is already retrying
+};
+```
+
+### Events are not replayed (Last-Event-ID is ignored)
+
+Every event is sent with an `id:` field, so after a reconnect the browser sends a `Last-Event-ID` header with the last id it saw. **The server currently ignores that header.** PingDrop keeps a small in-memory history, but it is used by the dashboard only, and nothing is replayed to reconnecting clients.
+
+Events published while a client is disconnected are lost for that client. A fresh connection is also a fresh queue: there is no backlog on connect. If you need reliable delivery, treat PingDrop as a "wake-up" signal and have the client re-fetch state from your API after every (re)connect:
+
+```js
+es.onopen = () => refreshStateFromApi();   // runs on first connect and after every reconnect
+```
+
+Also note that event ids are per process and restart from 1 when the app restarts, so they cannot be used as durable cursors.
+
+## Closing the connection
+
+```js
+window.addEventListener("pagehide", () => es.close());
+```
+
+Browsers close the stream when the page unloads, but calling `close()` explicitly is cleaner, and it is required when you replace an `EventSource` (for example after changing the filter or refreshing a token). A closed stream is detected by the server when the next write fails or the request is aborted; the dashboard then shows the connection as gone.
+
+## Authentication from the browser
+
+`EventSource` sends cookies on same-origin requests but cannot set custom headers. Cookie auth works unchanged; for bearer tokens see [Authentication](authentication.md#jwt-bearer-authentication). For cross-origin use you need CORS configured on your app and `new EventSource(url, { withCredentials: true })` for cookies.
+
+## Connection limits
+
+Over HTTP/1.1 browsers allow about six connections per origin, shared across all tabs. Each open `EventSource` holds one. Use HTTP/2 if users commonly open many tabs, or share one stream between tabs (for example with a `BroadcastChannel` or a `SharedWorker`).
+
+## Handling messages robustly
+
+```js
+function connect() {
+  const es = new EventSource("/pingdrop/stream?eventType=notification");
+
+  es.addEventListener("notification", e => {
+    let payload;
+    try { payload = JSON.parse(e.data); } catch { return; }
+    showToast(payload.Text);
+  });
+
+  es.onopen = refreshStateFromApi;
+  es.onerror = () => { if (es.readyState === EventSource.CLOSED) setTimeout(connect, 5000); };
+  return es;
+}
+```
+
+(`showToast` and `refreshStateFromApi` are your own functions.)
+
+## Without `EventSource`
+
+Because the protocol is plain SSE over HTTP, you can consume the stream from any HTTP client that streams the response body, for example `fetch` with a `ReadableStream` reader (which allows an `Authorization` header), or `curl -N`. You then have to parse the `id:`, `event:` and `data:` lines and handle reconnects yourself.
