@@ -10,7 +10,7 @@ The solution (`PingDrop.sln`) has two projects:
 - `PingDrop/` is the library, a class library with `FrameworkReference Microsoft.AspNetCore.App`.
 - `PingDrop.Web.Test/` is a Razor Pages host app that references the library. It is a manual test harness, not an automated test suite.
 
-`PingDrop.Tests/` is an xUnit project: `Unit/` covers internals (exposed via `InternalsVisibleTo`), and `Integration/` runs the real endpoints on `TestServer` through the `PingDropHost` helper. There is no linter config and no CI in the repo.
+`PingDrop.Tests/` is an xUnit project: `Unit/` covers internals (exposed via `InternalsVisibleTo`), and `Integration/` runs the real endpoints on `TestServer` through the `PingDropHost` helper. There is no linter config. CI lives in `.github/workflows/` (`ci.yml` builds and tests; `release.yml` publishes on `v*` tags) and has not yet run on GitHub.
 
 ## Commands
 
