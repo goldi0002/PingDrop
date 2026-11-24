@@ -19,7 +19,7 @@ public class PublishBenchmarks
     [Params(1, 100, 1000)]
     public int Clients;
 
-    [Params(64, 2048)]
+    [Params(512)]
     public int PayloadBytes;
 
     [GlobalSetup]

@@ -14,7 +14,7 @@ public class ConcurrentPublishBenchmarks
     private PDClientConnection[] _clients = null!;
     private object _payload = null!;
 
-    [Params(2048)]
+    [Params(512)]
     public int PayloadBytes;
 
     [GlobalSetup]
@@ -46,7 +46,7 @@ public class SseFrameBenchmarks
     private HttpResponse _response = null!;
     private PDNotification _notification = null!;
 
-    [Params(64, 2048)]
+    [Params(512)]
     public int PayloadBytes;
 
     [GlobalSetup]
