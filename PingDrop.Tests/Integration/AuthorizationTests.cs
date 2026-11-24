@@ -22,6 +22,7 @@ public class AuthorizationTests
     [InlineData("/metrics")]
     [InlineData("/about")]
     [InlineData("/connections")]
+    [InlineData("/events")]
     public async Task Dashboard_WithPolicy_RejectsAnonymous_AndNonMatchingUser(string route)
     {
         await using var host = await PingDropHost.StartAsync(o => o.Dashboard.AuthorizationPolicy = "Admin", withAuth: true);
@@ -37,6 +38,7 @@ public class AuthorizationTests
     [InlineData("")]
     [InlineData("/metrics")]
     [InlineData("/connections")]
+    [InlineData("/events")]
     public async Task Dashboard_WithPolicy_AllowsAuthorizedUser(string route)
     {
         await using var host = await PingDropHost.StartAsync(o => o.Dashboard.AuthorizationPolicy = "Admin", withAuth: true);

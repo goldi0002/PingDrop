@@ -405,12 +405,20 @@ namespace PingDrop.Extensions
 
             return metrics;
         }
+        private sealed record EventsQuery(int? limit);
+
+        private sealed record RecentEventInfo(long Id, string? EventType, string? Target, DateTime TimestampUtc, int SizeBytes, string? Payload);
+
+        private static string? Truncate(string? value, int max) =>
+            value is null || value.Length <= max ? value : value[..max] + "…";
+
         private static IEndpointRouteBuilder AddDashboardEndpoints(this IEndpointRouteBuilder endpoints, PingDropOptions options)
         {
             IDashboardService? _dashboardService = endpoints.ServiceProvider.GetRequiredService<IDashboardService>();
             IPDConnectionStore? _connectionStore = endpoints.ServiceProvider.GetRequiredService<IPDConnectionStore>();
             PingDropHub hub = endpoints.ServiceProvider.GetRequiredService<PingDropHub>();
             IEventPublisher _pub = endpoints.ServiceProvider.GetRequiredService<IEventPublisher>();
+            IEventHistoryStore _history = endpoints.ServiceProvider.GetRequiredService<IEventHistoryStore>();
             endpoints.MapGet(options.Dashboard.Path + "/metrics", async context =>
             {
                 AddJsonHeaders(context.Response);
@@ -466,6 +474,32 @@ namespace PingDrop.Extensions
                     context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                     await context.Response.WriteAsJsonAsync(ApiResponse<IReadOnlyCollection<PDDashboardModel.ConnectionInfo>>.Failure("Failed to retrieve connections"), _jsonOptions, context.RequestAborted);
                 }
+            });
+
+            endpoints.MapGet(options.Dashboard.Path + "/events", async context =>
+            {
+                int limit = 50;
+                string? q = context.Request.Query["q"];
+                if (!string.IsNullOrEmpty(q))
+                {
+                    try { limit = JsonSerializer.Deserialize<EventsQuery>(q)?.limit ?? limit; }
+                    catch (JsonException) { }
+                }
+                limit = Math.Clamp(limit, 1, 500);
+
+                var events = _history.GetRecentEvents(limit)
+                    .OrderByDescending(e => e.Id)
+                    .Select(e => new RecentEventInfo(
+                        e.Id,
+                        e.EventType,
+                        e.TargetKey,
+                        e.TimestampUtc,
+                        e.Payload is null ? 0 : System.Text.Encoding.UTF8.GetByteCount(e.Payload),
+                        options.Dashboard.ShowEventPayloads ? Truncate(e.Payload, 500) : null))
+                    .ToList();
+
+                AddJsonHeaders(context.Response);
+                await context.Response.WriteAsJsonAsync(ApiResponse<IReadOnlyCollection<RecentEventInfo>>.Success(events), _jsonOptions, context.RequestAborted);
             });
 
             PDSendRateLimiter? sendLimiter = options.Dashboard.MaxSendsPerMinute is int maxSends

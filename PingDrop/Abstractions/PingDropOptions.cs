@@ -312,6 +312,13 @@ namespace PingDrop.Abstractions
         public string? PathOverride { get; set; }
 
         /// <summary>
+        /// Gets or sets whether the dashboard's "Recent Events" view shows each event's payload (truncated to 500 characters).
+        /// Defaults to <see langword="false"/>: the view then lists id, type, target, time and size only.
+        /// </summary>
+        /// <remarks>Payloads can contain personal data; enable this only when everyone who can open the dashboard may see it.</remarks>
+        public bool ShowEventPayloads { get; set; }
+
+        /// <summary>
         /// Gets the effective path of the dashboard endpoint: <see cref="PathOverride"/> when set, otherwise
         /// <c>{EndpointPath}/dashboard</c>. It does not include the application's <c>PathBase</c>.
         /// </summary>

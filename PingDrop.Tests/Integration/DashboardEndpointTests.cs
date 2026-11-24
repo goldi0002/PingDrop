@@ -58,6 +58,40 @@ public class DashboardEndpointTests
     }
 
     [Fact]
+    public async Task Events_ListsRecentEventsNewestFirst_WithoutPayloadByDefault()
+    {
+        await using var host = await PingDropHost.StartAsync();
+        await host.Service.BroadcastAsync(new { secret = "s3cret" }, "first");
+        await host.Service.SendToAsync("alice", new { secret = "s3cret" }, "second");
+
+        var res = await host.Client.GetAsync($"{Base}/events");
+        var text = await res.Content.ReadAsStringAsync();
+        var data = JsonDocument.Parse(text).RootElement.GetProperty("data");
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal(2, data.GetArrayLength());
+        Assert.Equal("second", data[0].GetProperty("eventType").GetString());
+        Assert.Equal("alice", data[0].GetProperty("target").GetString());
+        Assert.False(data[1].TryGetProperty("target", out _));
+        Assert.True(data[0].GetProperty("sizeBytes").GetInt32() > 0);
+        Assert.DoesNotContain("s3cret", text);
+    }
+
+    [Fact]
+    public async Task Events_ShowsPayload_WhenEnabled_AndHonorsLimit()
+    {
+        await using var host = await PingDropHost.StartAsync(o => o.Dashboard.ShowEventPayloads = true);
+        for (int i = 0; i < 3; i++) await host.Service.BroadcastAsync(new { n = i }, "tick");
+
+        var q = Uri.EscapeDataString("{\"limit\":2}");
+        var res = await host.Client.GetAsync($"{Base}/events?q={q}");
+        var data = (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        Assert.Equal(2, data.GetArrayLength());
+        Assert.Contains("\"n\":2", data[0].GetProperty("payload").GetString());
+    }
+
+    [Fact]
     public async Task Connections_ListsConnectedClient()
     {
         await using var host = await PingDropHost.StartAsync();

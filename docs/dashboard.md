@@ -12,6 +12,10 @@ It shows:
 
 All counters and history are in memory and reset when the process restarts.
 
+## Recent Events
+
+The **Recent Events** page lists the newest entries of the event history (the same ring that backs replay, sized by `EventHistorySize`): id, UTC time, type, target (or "broadcast") and payload size. Payloads are hidden by default because they can contain personal data. Set `o.Dashboard.ShowEventPayloads = true` to show them (truncated to 500 characters) when everyone who can open the dashboard may see them.
+
 ## Where it lives
 
 The dashboard path is `<EndpointPath>/dashboard`. With the defaults:
@@ -24,6 +28,7 @@ The dashboard path is `<EndpointPath>/dashboard`. With the defaults:
 | `/pingdrop/stream/dashboard/metrics` | GET | Metrics (JSON) |
 | `/pingdrop/stream/dashboard/about` | GET | Version and process info (JSON) |
 | `/pingdrop/stream/dashboard/connections` | GET | Connection list (JSON); optional `q` parameter |
+| `/pingdrop/stream/dashboard/events` | GET | Recent events, newest first (JSON); optional `q={"limit":100}` (1–500, default 50) |
 | `/pingdrop/stream/dashboard/send-notification` | POST | Send a notification (JSON body) |
 | `/pingdrop/stream/dashboard/sse` | GET | The dashboard's own live feed (SSE) |
 

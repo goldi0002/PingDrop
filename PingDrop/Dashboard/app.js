@@ -1,5 +1,7 @@
 ﻿(function () {
     var activeSection;
+    // Everything that reaches the page from the server or from clients (target keys, event types, payloads) is untrusted.
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     class PingDropSSE {
         constructor(options = {}) {
             this.eventSource = null;
@@ -241,6 +243,10 @@
             try { const data = await this.get('connections', { status, searchTxt }); document.dispatchEvent(new CustomEvent('connectionsUpdated', { detail: data })); }
             catch (e) { this.showToast('Failed to load connections', 'error'); }
         }
+        async getEvents(limit = 100) {
+            try { const data = await this.get('events', { limit }); document.dispatchEvent(new CustomEvent('eventsUpdated', { detail: data })); }
+            catch (e) { this.showToast('Failed to load events', 'error'); }
+        }
         async sendNotification(notificationObj) {
             try {
                 const data = await this.post("send-notification", notificationObj);
@@ -275,13 +281,24 @@
             connections.forEach(c => {
                 const badgeClass = c.status === 'Active' ? 'badge-online' : c.status === 'Idle' ? 'badge-idle' : 'badge-offline';
                 this.$connectionsTableBody.innerHTML += `<tr>
-                            <td><code style="font-size:0.72rem">${c.connectionId}</code></td>
-                            <td>${c.targetKey}</td><td>${c.connectedAt}</td><td>${c.lastActivityAt}</td>
-                            <td>${c.eventsDelivered}</td><td>${c.idleDuration}</td><td>${c.subscribedEvents}</td>
-                            <td><span class="badge-status ${badgeClass}">${c.status}</span></td></tr>`;
+                            <td><code style="font-size:0.72rem">${esc(c.connectionId)}</code></td>
+                            <td>${esc(c.targetKey)}</td><td>${esc(c.connectedAt)}</td><td>${esc(c.lastActivityAt)}</td>
+                            <td>${esc(c.eventsDelivered)}</td><td>${esc(c.idleDuration)}</td><td>${esc(c.subscribedEvents)}</td>
+                            <td><span class="badge-status ${badgeClass}">${esc(c.status)}</span></td></tr>`;
             });
             const activeCount = connections.filter(c => c.status === 'Active').length;
             this.$activeConnectionCount.textContent = activeCount + ' active';
+        }
+        renderEvents(events) {
+            this.events = events || [];
+            const q = (document.getElementById('eventSearchInput').value || '').trim().toLowerCase();
+            const rows = this.events.filter(e => !q || (e.eventType || '').toLowerCase().includes(q) || (e.target || 'broadcast').toLowerCase().includes(q));
+            const body = document.getElementById('eventTable').querySelector('tbody');
+            body.innerHTML = rows.map(e => `<tr><td>${esc(e.id)}</td><td>${esc(e.timestampUtc)}</td><td>${esc(e.eventType)}</td>
+                <td>${e.target ? esc(e.target) : '<em>broadcast</em>'}</td><td>${esc(e.sizeBytes)} B</td>
+                <td><code style="font-size:0.72rem">${e.payload == null ? '<em>hidden</em>' : esc(e.payload)}</code></td></tr>`).join('');
+            document.getElementById('eventEmpty').style.display = rows.length ? 'none' : 'block';
+            document.getElementById('eventCount').textContent = rows.length + (rows.length === 1 ? ' event' : ' events');
         }
         renderAboutTable(about) {
             this.$aboutTable.innerHTML = '';
@@ -291,7 +308,7 @@
                 ['Start Time', about.startedAt], ['OS', about.os]
             ];
             const tbody = document.createElement('tbody');
-            tbody.innerHTML = rows.map(([key, value]) => `<tr><td><strong>${key}</strong></td><td>${value}</td></tr>`).join('');
+            tbody.innerHTML = rows.map(([key, value]) => `<tr><td><strong>${esc(key)}</strong></td><td>${esc(value)}</td></tr>`).join('');
             this.$aboutTable.appendChild(tbody);
         }
     }
@@ -461,11 +478,15 @@
             activeSection = section;
             if (section === 'logs') this.scrollLogToBottom();
             if (section === 'connections') this.$api.getConnections('All');
+            if (section === 'events') this.$api.getEvents();
             if (section === 'about') this.$api.getAbout();
         }
         pingDropEventListerners() {
             document.addEventListener('metricsUpdated', (e) => { if (e.detail.isSuccess) this.$dashboard.renderMetrics(e.detail.data); });
             document.addEventListener('connectionsUpdated', (e) => { if (e.detail.isSuccess) this.$dashboard.renderConnectionTable(e.detail.data); });
+            document.addEventListener('eventsUpdated', (e) => { if (e.detail.isSuccess) this.$dashboard.renderEvents(e.detail.data); });
+            document.getElementById('eventRefreshBtn').addEventListener('click', () => this.$api.getEvents());
+            document.getElementById('eventSearchInput').addEventListener('input', () => this.$dashboard.renderEvents(this.$dashboard.events));
             document.addEventListener('aboutUpdated', (e) => { if (e.detail.isSuccess) this.$dashboard.renderAboutTable(e.detail.data); });
         }
         sseEventListeners() {

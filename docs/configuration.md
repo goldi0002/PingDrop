@@ -147,6 +147,7 @@ The id is a process-local `long` (it is the same id the dashboard shows). It is 
 | `LogEachDispatch` | `bool` | `false` | Also publish a live-log line for every event dispatched to a client. Connect and disconnect lines are always shown while a dashboard is open. Live logs and metric pushes are skipped entirely when the dashboard is disabled or no dashboard feed is connected. |
 | `MaxSendsPerMinute` | `int?` | `null` (unlimited) | Maximum `POST <dashboard>/send-notification` requests per minute (fixed one-minute window, whole process). Over the limit: HTTP 429 with `Retry-After`. Must be at least 1. |
 | `MaxFeedConnections` | `int?` | `10` | Maximum simultaneous dashboard live-feed connections (open dashboard pages), counted separately from `MaxTotalConnections`. Over the cap: HTTP 503 with `Retry-After`. `null` is unlimited. Must be at least 1. |
+| `ShowEventPayloads` | `bool` | `false` | Show each event's payload (truncated to 500 characters) in the dashboard's Recent Events page. Off by default; payloads can contain personal data. |
 | `PathOverride` | `string?` | `null` | Custom dashboard route such as `/admin/pingdrop`, replacing the default. A leading slash is added and trailing slashes are removed; `null`, empty or `/` keeps the default. The old default path is then not mapped (404). |
 | `Path` | `string` (read-only) | `<EndpointPath>/dashboard` | The effective dashboard path: `PathOverride` when set, otherwise derived from `EndpointPath`. Does not include the app's `PathBase`. |
 
