@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PingDrop Blazor sample</title>
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+<body>
+    <Routes @rendermode="InteractiveServer" />
+
+    @* The bundled PingDrop client (defines window.PingDropClient), then our small interop module. *@
+    <script src="/pingdrop/stream/client.js"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

@@ -82,6 +82,7 @@ In the Development environment the dashboard is available at `/pingdrop/stream/d
 
 ## Next steps
 
+- [Samples](../samples/README.md): minimal API, MVC, Blazor and background-sender apps you can run
 - [Configuration](configuration.md) for all options
 - [Authentication](authentication.md) before going to production
 - [Reverse proxy](reverse-proxy.md) if you deploy behind nginx, IIS, Azure or Cloudflare

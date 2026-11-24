@@ -63,6 +63,7 @@ To send to one user instead of everyone, identify subscribers with `TargetKeyRes
 | [Dashboard](docs/dashboard.md) | Routes, the send-notification API, security |
 | [Observability](docs/observability.md) | OpenTelemetry meter and activity source, instrument list |
 | [Limitations](docs/limitations.md) | Single node, in-memory, best-effort replay, queue behaviour |
+| [Samples](samples/README.md) | Runnable minimal API, MVC, Blazor and background-sender apps |
 
 ## License
 

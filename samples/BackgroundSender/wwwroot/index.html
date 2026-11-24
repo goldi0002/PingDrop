@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PingDrop background sender sample</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    li { padding: .25rem 0; border-bottom: 1px solid #ddd; }
+    .private { color: #a00; }
+  </style>
+</head>
+<body>
+  <h1>Background sender</h1>
+  <p>Listening as <strong id="who"></strong>. Open <code>/?userId=alice</code> to also see private events.</p>
+  <ul id="log"></ul>
+
+  <script src="/pingdrop/stream/client.js"></script>
+  <script>
+    const userId = new URLSearchParams(location.search).get("userId") || "guest";
+    document.getElementById("who").textContent = userId;
+    const add = (text, cls) => {
+      const li = document.createElement("li");
+      li.textContent = text; if (cls) li.className = cls;
+      document.getElementById("log").prepend(li);
+    };
+
+    const client = new PingDropClient({ url: "/pingdrop/stream", params: { userId } });
+    client.on("tick", d => add(`tick #${d.Tick} at ${d.At}`));
+    client.on("private", d => add(d.Text, "private"));
+  </script>
+</body>
+</html>
