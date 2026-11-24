@@ -10,10 +10,11 @@ All state lives in the memory of one process: the connection table, the per-clie
 - If you scale out, you have to route sends yourself (for example, publish through your own queue or pub/sub and have every instance call `IPingDropService` locally). PingDrop does not do this for you.
 - Restarting or redeploying the process drops every connection and resets all metrics. Clients reconnect on their own (see [JavaScript client](javascript-client.md)), but they start with nothing.
 
-## No replay, no durability
+## Best-effort replay, no durability
 
-- Events are not stored for delivery. If a client is disconnected when an event is sent, it never receives it.
-- The `Last-Event-ID` header sent by reconnecting browsers is ignored. See [JavaScript client](javascript-client.md#events-are-not-replayed-last-event-id-is-ignored).
+- Replay is best effort. A client that reconnects with `Last-Event-ID` (or `?lastEventId=`) is sent the events it missed that are still in the in-memory history (`EventHistorySize`, default 50), limited to what it would have received live. Events that fell out of the history, or were sent before the last restart, are gone. See [JavaScript client](javascript-client.md#replay-of-missed-events-last-event-id). Disable it with `EnableReplay = false`.
+- Ids are per process. After a restart ids start again at 1, so the server cannot tell what a client missed: a `Last-Event-ID` larger than any id the new process has issued replays nothing, and a stale id that happens to be smaller than the new process's newest id replays events that are new to that client. Treat replay as a gap filler for short network drops, not as a durable log.
+- Replay is not acknowledged and not guaranteed. Replay needs the client to send its last id, which a browser does only after it has received an event with an `id:` field; a client that never received one gets no replay.
 - There is no acknowledgement. `BroadcastAsync` and `SendToAsync` return when the event has been placed in each client's queue, not when it has been written to the network or received by the browser.
 - Event ids are per-process counters that restart at 1.
 
@@ -23,11 +24,11 @@ Use PingDrop for transient notifications, and keep the source of truth in your d
 
 Each connection has its own bounded queue, **20** notifications by default with a **drop-oldest** policy. If a client reads slowly (slow network, throttled background tab) and the queue fills, the oldest unsent events are discarded to make room for new ones. Both are configurable: `ClientQueueCapacity` sets the size, and `ClientQueueFullMode` chooses `DropOldest`, `DropNewest` or `DisconnectClient` (end the stream so the client reconnects). See [Configuration](configuration.md#clientqueuecapacity--clientqueuefullmode).
 
-Delivery order within one client is preserved for the events that remain. Events discarded by overflow are counted in the dashboard's "Dropped Deliveries" metric. Nothing replays them, so a client that was dropped from or disconnected will not receive the lost events (see "No replay" above).
+Delivery order within one client is preserved for the events that remain. Events discarded by overflow are counted in the dashboard's "Dropped Deliveries" metric. Events lost to overflow are not retried while the connection stays open; a client that is disconnected (for example under `DisconnectClient`) can recover the ones still in the history when it reconnects (see "Best-effort replay" above).
 
 ## Event history
 
-`EventHistorySize` (default 50) controls an in-memory ring of recent events. It exists for the dashboard's benefit. It is not used for replay, it is not queryable through the public API for your own use, and it is lost on restart.
+`EventHistorySize` (default 50) controls an in-memory ring of recent events. It feeds the dashboard and is the source for `Last-Event-ID` replay, so it also bounds how far back a reconnecting client can catch up. It is not queryable through the public API for your own use, and it is lost on restart. With `EnableReplay` on (the default), an event is recorded even when no client is connected, so the only listener can catch up after a gap; such an event is not counted in "Events Published".
 
 ## Delivery model
 

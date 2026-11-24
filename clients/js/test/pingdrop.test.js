@@ -11,7 +11,7 @@ class FakeES {
   addEventListener(n, fn) { (this.listeners[n] = this.listeners[n] || []).push(fn); }
   close() { this.readyState = 2; this.closedByClient = true; }
   open() { this.readyState = 1; this.onopen && this.onopen({}); }
-  message(name, data) { (this.listeners[name] || []).forEach(f => f({ data, type: name })); }
+  message(name, data, id) { (this.listeners[name] || []).forEach(f => f({ data, type: name, lastEventId: id === undefined ? '' : String(id) })); }
   fail(closed) { this.readyState = closed ? 2 : 0; this.onerror && this.onerror({ type: 'error' }); }
 }
 FakeES.instances = [];
@@ -146,4 +146,38 @@ test('a throwing handler does not break others', () => {
   last().message('x', '7');
   console.error = orig;
   assert.deepEqual(got, [7]);
+});
+
+test('manual reconnect sends the last seen event id as lastEventId', () => {
+  const { client, timers } = make({ eventTypes: ['n'], params: { uId: '7' } });
+  assert.equal(client.lastEventId, null);
+  last().message('n', '1', 4);
+  last().message('n', '2', 5);
+  assert.equal(client.lastEventId, '5');
+  assert.equal(client.url, '/pingdrop/stream?uId=7&eventType=n'); // url stays the base url
+  last().fail(true);
+  timers[0].fn();
+  assert.equal(last().url, '/pingdrop/stream?uId=7&eventType=n&lastEventId=5');
+  last().message('n', '3', 6);
+  last().fail(true);
+  timers[1].fn();
+  assert.match(last().url, /lastEventId=6/);
+  assert.equal((last().url.match(/lastEventId/g) || []).length, 1);
+});
+
+test('no lastEventId before any event, and replay:false or an explicit param disables tracking', () => {
+  let { client, timers } = make({ eventTypes: ['n'] });
+  last().fail(true); timers[0].fn();
+  assert.equal(last().url, '/pingdrop/stream?eventType=n');
+
+  ({ client, timers } = make({ eventTypes: ['n'], replay: false }));
+  last().message('n', '1', 9);
+  last().fail(true); timers[0].fn();
+  assert.doesNotMatch(last().url, /lastEventId/);
+
+  ({ client, timers } = make({ eventTypes: ['n'], params: { lastEventId: '100' } }));
+  last().message('n', '1', 9);
+  last().fail(true); timers[0].fn();
+  assert.equal((last().url.match(/lastEventId/g) || []).length, 1);
+  assert.match(last().url, /lastEventId=100/);
 });

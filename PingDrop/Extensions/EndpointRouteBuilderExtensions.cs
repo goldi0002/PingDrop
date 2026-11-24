@@ -125,6 +125,8 @@ namespace PingDrop.Extensions
 
             HashSet<string>? events = ParseEvents(context.Request.Query[InternalConstants.DefaultQueryEventTypeParam]);
             string? subscriberKey = options.TargetKeyResolver?.Invoke(context);
+            long? lastEventId = options.EnableReplay ? PDReplay.ParseLastEventId(context.Request) : null;
+            // The client is registered (live events start queueing) before the history is snapshotted below.
             await using PDClientConnection client = hub.AddClient(events, subscriberKey);
             PDLog.ClientConnected(logger, client.ConnectionId, subscriberKey);
             // Shutdown may have swept the store just before this client was added; complete it so the loop below ends.
@@ -149,11 +151,67 @@ namespace PingDrop.Extensions
             {
                 // Register first, then flush: once the client sees headers it is guaranteed to receive broadcasts.
                 await PDSseWriter.WriteConnectedAsync(context.Response, options.ClientRetryInterval, context.RequestAborted);
+
+                // Replay missed events. They are written straight to the response (not through the bounded queue), so a gap
+                // larger than the queue cannot lose any. Live events published meanwhile wait in the queue.
+                // Anything in the queue with an id up to dedupeThrough was already sent (or already seen by the client).
+                long dedupeThrough = 0;
+                if (lastEventId is long seen)
+                {
+                    dedupeThrough = seen;
+                    long newestId = hub.LastIssuedEventId;
+                    if (seen > newestId)
+                    {
+                        // Ids restart with the process; nothing can be said about what this client missed.
+                        dedupeThrough = 0;
+                        PDLog.ReplaySkippedUnknownId(logger, client.ConnectionId, seen, newestId);
+                    }
+                    else
+                    {
+                        // Snapshot, write, and snapshot again until nothing newer is retained. Writing a long replay takes
+                        // time during which live events keep queueing; a small queue may evict some of them, but every
+                        // event is in the history first, so the next round re-sends whatever is still missing. When a
+                        // round finds nothing, every later event is delivered after the client registered and is in the queue.
+                        int replayed = 0;
+                        while (true)
+                        {
+                            IReadOnlyList<PDNotification> missed = hub.GetReplayEvents(client, dedupeThrough);
+                            if (missed.Count == 0) break;
+
+                            foreach (PDNotification missedEvent in missed)
+                            {
+                                try
+                                {
+                                    await PDSseWriter.WriteAsync(context.Response, missedEvent, context.RequestAborted);
+                                    hub.RecordReplayedDelivery();
+                                    client.MarkDelivered();
+                                    dedupeThrough = missedEvent.Id;
+                                    replayed++;
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    hub.IncrementDroppedDispatches();
+                                    throw;
+                                }
+                            }
+                        }
+                        if (replayed > 0)
+                            PDLog.EventsReplayed(logger, replayed, client.ConnectionId, seen);
+                    }
+                }
+
                 var channelReader = client.NotificationChannel.Reader;
                 while (await WaitToReadWithHeartbeatAsync(channelReader, context.Response, options.HeartbeatInterval, client, context.RequestAborted))
                 {
                     while (channelReader.TryRead(out var evt))
                     {
+                        if (evt.Id <= dedupeThrough)
+                        {
+                            // Already replayed (or already seen by the client): published while the replay was being built.
+                            // Its queued copy counted as an attempted delivery, so close it out as dispatched.
+                            hub.IncrementSuccessfulDispatches();
+                            continue;
+                        }
                         try
                         {
                             await PDSseWriter.WriteAsync(context.Response, evt, context.RequestAborted);

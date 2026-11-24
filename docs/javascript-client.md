@@ -26,7 +26,7 @@ The library serves a small client script at `<EndpointPath>/client.js` (default 
 </script>
 ```
 
-Behaviour: while the browser is retrying natively the client only reports `error`; when the browser gives up (readyState `CLOSED`: 401, 403, 204, wrong content type) the client creates a new `EventSource` after an exponentially growing, jittered delay, resetting on `open`. `close()` stops everything. It does not replay missed events (see below). Full reference: [`clients/js/README.md`](../clients/js/README.md).
+Behaviour: while the browser is retrying natively the client only reports `error`; when the browser gives up (readyState `CLOSED`: 401, 403, 204, wrong content type) the client creates a new `EventSource` after an exponentially growing, jittered delay, resetting on `open`. `close()` stops everything. On a manual reconnect it sends the last seen event id so the server can replay missed events (see below). Full reference: [`clients/js/README.md`](../clients/js/README.md).
 
 The rest of this page describes the plain `EventSource` behaviour the client builds on.
 
@@ -93,17 +93,32 @@ es.onerror = () => {
 };
 ```
 
-### Events are not replayed (Last-Event-ID is ignored)
+### Replay of missed events (Last-Event-ID)
 
-Every event is sent with an `id:` field, so after a reconnect the browser sends a `Last-Event-ID` header with the last id it saw. **The server currently ignores that header.** PingDrop keeps a small in-memory history, but it is used by the dashboard only, and nothing is replayed to reconnecting clients.
+Every event is sent with an `id:` field. When a connection drops and the browser reconnects it, it sends a `Last-Event-ID` header with the last id it saw, and PingDrop replays the events it still has in its in-memory history with a larger id, before live events resume. Replay only includes what the client would have received live: broadcasts, events sent to its subscriber key, and its `eventType` filter. Turn it off with `EnableReplay = false` ([Configuration](configuration.md#enablereplay)).
 
-Events published while a client is disconnected are lost for that client. A fresh connection is also a fresh queue: there is no backlog on connect. If you need reliable delivery, treat PingDrop as a "wake-up" signal and have the client re-fetch state from your API after every (re)connect:
+If the browser gives up (`readyState === CLOSED`) and you create a new `EventSource`, it starts with no id and cannot set headers. Send the last id yourself as a query parameter, which the server accepts as a fallback:
+
+```js
+let lastId = null;
+es.addEventListener('notification', e => { lastId = e.lastEventId; });
+// later, after creating a new EventSource:
+const es2 = new EventSource('/pingdrop/stream?uId=42' + (lastId ? '&lastEventId=' + lastId : ''));
+```
+
+`PingDropClient` does this for you (`client.lastEventId`, `replay: false` to disable).
+
+Replay is best effort, not a delivery guarantee:
+
+- It is limited to the last `EventHistorySize` events (default 50), kept in memory. A longer gap replays only what is retained.
+- Event ids are per process and restart from 1 when the app restarts. If the id you send is greater than any id the server has issued (typical right after a restart), nothing is replayed, because the server cannot know what you missed. A stale id smaller than the new process's newest id replays events that are new to you, so do not treat ids as durable cursors.
+- Events are tracked by the client only when a handler is registered for their type.
+
+If you need reliable delivery, still treat PingDrop as a "wake-up" signal and re-fetch state from your API after every (re)connect:
 
 ```js
 es.onopen = () => refreshStateFromApi();   // runs on first connect and after every reconnect
 ```
-
-Also note that event ids are per process and restart from 1 when the app restarts, so they cannot be used as durable cursors.
 
 ## Closing the connection
 

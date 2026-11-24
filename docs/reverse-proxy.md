@@ -3,7 +3,7 @@
 An SSE stream is a normal HTTP response that never ends. Anything between the browser and Kestrel can break that in two ways:
 
 1. **Buffering.** The proxy collects the response and forwards it in chunks (or at the end). Events then arrive late, in bursts, or never.
-2. **Idle timeouts.** The proxy closes a connection that has carried no bytes for N seconds. The browser reconnects, but each reconnect is a gap during which events are lost (PingDrop does not replay; see [Limitations](limitations.md)).
+2. **Idle timeouts.** The proxy closes a connection that has carried no bytes for N seconds. The browser reconnects, but each reconnect is a gap. PingDrop replays retained events on reconnect (best effort, limited by `EventHistorySize`; see [Limitations](limitations.md)), so a short gap is usually recovered.
 
 ## What PingDrop sends
 
@@ -106,7 +106,7 @@ Cloudflare proxies `text/event-stream` responses through without caching them, b
 
 When the host starts stopping (`ApplicationStopping`, for example on SIGTERM or a deployment), PingDrop completes every open stream, the dashboard feed included. Each client's stream ends cleanly, `ClientDisconnected` runs for it, and the host does not wait out the shutdown timeout (30 s by default) for streams that would otherwise stay open. Browsers' `EventSource` then reconnects after `ClientRetryInterval`, which lets the load balancer send them to the next instance.
 
-A stream request that arrives after shutdown has begun is answered with `503 Service Unavailable` (`EventSource` retries it). Notifications still queued for a client at that moment are flushed before its stream ends only if the host's shutdown timeout allows; there is no replay, so clients can miss events during a restart (see [Limitations](limitations.md)).
+A stream request that arrives after shutdown has begun is answered with `503 Service Unavailable` (`EventSource` retries it). Notifications still queued for a client at that moment are flushed before its stream ends only if the host's shutdown timeout allows; ids restart with the process, so a client cannot replay across a restart and can miss events during one (see [Limitations](limitations.md)).
 
 ## HTTP/1.1 connection limits
 

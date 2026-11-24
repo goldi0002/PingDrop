@@ -6,7 +6,7 @@ using System.Diagnostics;
 
 namespace PingDrop.Internal
 {
-    internal sealed class PingDropHub(IPDConnectionStore connections, IEventHistoryStore eventHistoryStore, INotificationFactory notificationFactory, ILoggerFactory? loggerFactory = null) : IPingDropService
+    internal sealed class PingDropHub(IPDConnectionStore connections, IEventHistoryStore eventHistoryStore, INotificationFactory notificationFactory, ILoggerFactory? loggerFactory = null, PingDropOptions? options = null) : IPingDropService
     {
         private static readonly ActivitySource _activitySource = new(InternalConstants.ActivitySourceName, InternalConstants.ActivityVersion);
         private readonly IPDConnectionStore _connectionStore = connections;
@@ -14,6 +14,8 @@ namespace PingDrop.Internal
         private readonly INotificationFactory _notificationFactory = notificationFactory;
 
         private readonly ILogger _logger = loggerFactory?.CreateLogger(PDLog.Category) ?? NullLogger.Instance;
+        private readonly object _publishLock = new();
+        private readonly bool _replayEnabled = options?.EnableReplay ?? false;
         private long _lastDropWarningTicks;
         private long _suppressedDropWarnings;
 
@@ -35,24 +37,7 @@ namespace PingDrop.Internal
             ArgumentNullException.ThrowIfNull(notification);
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (_connectionStore.Count == 0)
-            {
-                return ValueTask.CompletedTask;
-            }
-
-            PDNotification pdNotification = _notificationFactory.CreateNotification(notification, eventType);
-
-            Interlocked.Increment(ref _totalEventsPublished);
-            _eventHistoryStore.AddEvent(pdNotification);
-
-            using Activity? activity = _activitySource.StartActivity("PingDrop.Broadcast", ActivityKind.Internal);
-
-            activity?.SetTag(InternalConstants.EventTypeTag, eventType);
-            activity?.SetTag(InternalConstants.EventIdTag, pdNotification.Id);
-            activity?.SetTag(InternalConstants.EventPayloadSizeTag, pdNotification.Payload?.Length);
-            activity?.SetTag(InternalConstants.ClientsCountTag, _connectionStore.Count);
-
-            DeliverNotification(pdNotification, eventType, _connectionStore.GetAll());
+            Publish(notification, eventType, null, null, () => _connectionStore.GetAll().ToList(), "PingDrop.Broadcast", null);
 
             return ValueTask.CompletedTask;
         }
@@ -68,26 +53,7 @@ namespace PingDrop.Internal
                 return ValueTask.CompletedTask;
             }
 
-            int clientCount = _connectionStore.CountByKey(targetKey);
-
-            if (clientCount == 0)
-            {
-                return ValueTask.CompletedTask;
-            }
-
-            PDNotification pdNotification = _notificationFactory.CreateNotification(notification, eventType, targetKey);
-            Interlocked.Increment(ref _totalEventsPublished);
-            _eventHistoryStore.AddEvent(pdNotification);
-
-            using Activity? activity = _activitySource.StartActivity("PingDrop.SendTo", ActivityKind.Internal);
-
-            activity?.SetTag(InternalConstants.EventTypeTag, eventType);
-            activity?.SetTag(InternalConstants.EventIdTag, pdNotification.Id);
-            activity?.SetTag(InternalConstants.EventPayloadSizeTag, pdNotification.Payload?.Length);
-            activity?.SetTag(InternalConstants.SubscriberKeyTag, targetKey);
-            activity?.SetTag(InternalConstants.ClientsCountTag, clientCount);
-
-            DeliverNotification(pdNotification, eventType, _connectionStore.GetByKey(targetKey));
+            Publish(notification, eventType, targetKey, [targetKey], () => _connectionStore.GetByKey(targetKey).ToList(), "PingDrop.SendTo", targetKey);
 
             return ValueTask.CompletedTask;
         }
@@ -105,29 +71,87 @@ namespace PingDrop.Internal
                 throw new ArgumentException("At least one non-blank target key is required.", nameof(targetKeys));
             }
 
-            List<PDClientConnection> clients = keys.Where(k => k != InternalConstants.DashboardSubscriberKey).SelectMany(_connectionStore.GetByKey).Distinct().ToList();
+            // The dashboard's own feed is never a target.
+            keys.RemoveAll(k => k == InternalConstants.DashboardSubscriberKey);
 
-            if (clients.Count == 0)
+            if (keys.Count == 0)
             {
                 return ValueTask.CompletedTask;
             }
 
             string joinedKeys = string.Join(",", keys);
-            PDNotification pdNotification = _notificationFactory.CreateNotification(notification, eventType, joinedKeys);
-            Interlocked.Increment(ref _totalEventsPublished);
-            _eventHistoryStore.AddEvent(pdNotification);
-
-            using Activity? activity = _activitySource.StartActivity("PingDrop.SendTo", ActivityKind.Internal);
-
-            activity?.SetTag(InternalConstants.EventTypeTag, eventType);
-            activity?.SetTag(InternalConstants.EventIdTag, pdNotification.Id);
-            activity?.SetTag(InternalConstants.EventPayloadSizeTag, pdNotification.Payload?.Length);
-            activity?.SetTag(InternalConstants.SubscriberKeyTag, joinedKeys);
-            activity?.SetTag(InternalConstants.ClientsCountTag, clients.Count);
-
-            DeliverNotification(pdNotification, eventType, clients);
+            Publish(notification, eventType, joinedKeys, keys, () => keys.SelectMany(_connectionStore.GetByKey).Distinct().ToList(), "PingDrop.SendTo", joinedKeys);
 
             return ValueTask.CompletedTask;
+        }
+
+        /// <summary>
+        /// Creates, records and delivers one event. The whole sequence runs under one lock so that event ids, history order and
+        /// per-client queue order all agree. Replay relies on this: a client that registers and then snapshots the history
+        /// either sees an event in the snapshot (it was recorded first) or receives it live (it was delivered after the
+        /// client registered), and ids in both sources are strictly increasing.
+        /// </summary>
+        private void Publish<T>(T notification, string eventType, string? targetKey, IReadOnlyList<string>? targetKeys,
+            Func<List<PDClientConnection>> resolveClients, string activityName, string? subscriberKeyTag)
+        {
+            lock (_publishLock)
+            {
+                // Peek at the recipients first so that, with replay off, an event nobody receives does not consume an id.
+                if (!_replayEnabled && resolveClients().Count == 0)
+                {
+                    return;
+                }
+
+                PDNotification pdNotification = _notificationFactory.CreateNotification(notification, eventType, targetKey, targetKeys);
+
+                // Record before resolving recipients: a client that registered before this point and snapshots the history
+                // later may or may not see this event in the snapshot, but it is then guaranteed to be among the recipients
+                // below if it did not.
+                _eventHistoryStore.AddEvent(pdNotification);
+
+                List<PDClientConnection> clients = resolveClients();
+
+                if (clients.Count == 0)
+                {
+                    // Nobody is connected: the event is kept for replay only. It is not counted as published because it
+                    // was not delivered to anyone.
+                    return;
+                }
+
+                Interlocked.Increment(ref _totalEventsPublished);
+
+                using Activity? activity = _activitySource.StartActivity(activityName, ActivityKind.Internal);
+
+                activity?.SetTag(InternalConstants.EventTypeTag, eventType);
+                activity?.SetTag(InternalConstants.EventIdTag, pdNotification.Id);
+                activity?.SetTag(InternalConstants.EventPayloadSizeTag, pdNotification.Payload?.Length);
+                if (subscriberKeyTag is not null)
+                {
+                    activity?.SetTag(InternalConstants.SubscriberKeyTag, subscriberKeyTag);
+                }
+                activity?.SetTag(InternalConstants.ClientsCountTag, clients.Count);
+
+                DeliverNotification(pdNotification, eventType, clients);
+            }
+        }
+
+        /// <summary>The newest event id this process has issued (0 when none).</summary>
+        public long LastIssuedEventId => _notificationFactory.LastIssuedId;
+
+        /// <summary>
+        /// Returns the retained events a client that last saw <paramref name="lastEventId"/> still needs, in id order, limited
+        /// to what the client is entitled to receive live. Returns an empty list when <paramref name="lastEventId"/> is newer
+        /// than any id this process has issued (for example after a restart, when ids start over).
+        /// The caller must have registered the client before calling this.
+        /// </summary>
+        public IReadOnlyList<PDNotification> GetReplayEvents(PDClientConnection client, long lastEventId)
+        {
+            if (lastEventId > LastIssuedEventId)
+            {
+                return [];
+            }
+
+            return PDReplay.Select(_eventHistoryStore.GetAll(), client, lastEventId);
         }
 
         private void DeliverNotification(PDNotification notification, string eventType, IEnumerable<PDClientConnection> clients)
@@ -217,6 +241,13 @@ namespace PingDrop.Internal
         }
         public void IncrementSuccessfulDispatches()
         {
+            Interlocked.Increment(ref _successfulDispatchedDeliveries);
+        }
+        /// <summary>Counts one event written to a client during replay as an attempted, queued and dispatched delivery (not as a published event).</summary>
+        public void RecordReplayedDelivery()
+        {
+            Interlocked.Increment(ref _attemptedDeliveries);
+            Interlocked.Increment(ref _successfulDeliveries);
             Interlocked.Increment(ref _successfulDispatchedDeliveries);
         }
         public void IncrementDroppedDispatches()

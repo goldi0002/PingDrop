@@ -12,7 +12,9 @@ namespace PingDrop.Internal
         /// </remarks>
         private long _eventId;
 
-        public PDNotification CreateNotification<T>(T notification, string eventType, string? targetKey = null)
+        public long LastIssuedId => Interlocked.Read(ref _eventId);
+
+        public PDNotification CreateNotification<T>(T notification, string eventType, string? targetKey = null, IReadOnlyList<string>? targetKeys = null)
         {
             var payloadJson = JsonSerializer.Serialize(notification);
             return new PDNotification
@@ -21,7 +23,8 @@ namespace PingDrop.Internal
                 EventType = eventType,
                 Payload = payloadJson,
                 TimestampUtc = DateTime.UtcNow,
-                TargetKey = targetKey
+                TargetKey = targetKey,
+                TargetKeys = targetKeys ?? (targetKey is null ? null : [targetKey])
             };
         }
     }

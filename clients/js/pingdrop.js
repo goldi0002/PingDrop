@@ -55,6 +55,7 @@
    * @param {object} [options.params]        extra query parameters
    * @param {boolean} [options.withCredentials]
    * @param {object|false} [options.reconnect]  { initialDelayMs, maxDelayMs, factor, jitter } or false to disable
+   * @param {boolean} [options.replay=true]  on a manual reconnect, send the last seen event id as ?lastEventId=N so the server replays missed events
    * @param {boolean} [options.autoConnect=true]
    * @param {Function} [options.EventSourceImpl]  EventSource constructor (for tests / polyfills)
    * @param {Function} [options.random]      Math.random replacement
@@ -81,10 +82,13 @@
     var attempt = 0;
     var userClosed = false;
     var state = 'connecting';
+    var lastEventId = null;  // id of the newest event delivered to a handler
+    var resume = options.replay !== false && !(options.params && options.params.lastEventId !== undefined);
 
     this.url = buildUrl(options.url || '/pingdrop/stream', options.eventTypes, options.params);
 
     Object.defineProperty(this, 'state', { get: function () { return state; }, enumerable: true });
+    Object.defineProperty(this, 'lastEventId', { get: function () { return lastEventId; }, enumerable: true });
     Object.defineProperty(this, 'readyState', { get: function () { return es ? es.readyState : CLOSED; } });
 
     function emit(name, a, b) {
@@ -100,7 +104,10 @@
     function attach(name) {
       if (!es || attached[name]) return;
       attached[name] = true;
-      es.addEventListener(name, function (evt) { emit(name, parseData(evt.data), evt); });
+      es.addEventListener(name, function (evt) {
+        if (evt && evt.lastEventId) lastEventId = evt.lastEventId;
+        emit(name, parseData(evt.data), evt);
+      });
     }
 
     /** Delay before reconnect attempt number `n` (0-based), in ms. */
@@ -114,7 +121,10 @@
       timer = null;
       state = 'connecting';
       attached = {};
-      es = new ES(self.url, { withCredentials: !!options.withCredentials });
+      // The browser sends Last-Event-ID itself when it reconnects an open stream; a new EventSource starts with none,
+      // so pass the last seen id as a query parameter (the server accepts it as a fallback).
+      var target = resume && lastEventId !== null ? buildUrl(self.url, null, { lastEventId: lastEventId }) : self.url;
+      es = new ES(target, { withCredentials: !!options.withCredentials });
       var current = es;
 
       es.onopen = function () {

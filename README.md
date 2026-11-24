@@ -62,7 +62,7 @@ To send to one user instead of everyone, identify subscribers with `TargetKeyRes
 | [JavaScript client](docs/javascript-client.md) | Bundled client (`/pingdrop/stream/client.js`), `EventSource` usage, event filtering, reconnects |
 | [Dashboard](docs/dashboard.md) | Routes, the send-notification API, security |
 | [Observability](docs/observability.md) | OpenTelemetry meter and activity source, instrument list |
-| [Limitations](docs/limitations.md) | Single node, in-memory, no replay, queue behaviour |
+| [Limitations](docs/limitations.md) | Single node, in-memory, best-effort replay, queue behaviour |
 
 ## License
 

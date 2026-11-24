@@ -33,11 +33,15 @@ client.close();               // stops for good, no further reconnects
 
 While the browser is retrying by itself (`readyState` CONNECTING) the client just reports `error`. When the browser gives up (`readyState` CLOSED, e.g. HTTP 401/403/204 or a wrong content type) the client opens a new `EventSource` after `min(maxDelayMs, initialDelayMs * factor^attempt)`, reduced by up to `jitter` (a 0 to 1 fraction) at random. The attempt counter resets on `open`. Pass `reconnect: false` to disable this; the client then emits `close`.
 
-Note that PingDrop does not replay missed events yet (`Last-Event-ID` is ignored by the server), so re-fetch state on every `open`.
+### Missed events (replay)
+
+The server replays retained events a client missed. When the browser reconnects an open stream it sends a `Last-Event-ID` header by itself. When the browser gave up and this client creates a new `EventSource`, the new object has no id, so the client tracks the last `evt.lastEventId` it delivered (also exposed as `client.lastEventId`) and connects with `?lastEventId=N`, which the server accepts as a fallback to the header. Pass `replay: false` to turn this off, or set `params.lastEventId` yourself to take control.
+
+Replay is best effort: it is limited to the server's `EventHistorySize`, held in memory, and ids restart when the server process restarts (a larger id than the server has issued replays nothing). Only events that have a handler registered are tracked. Keep re-fetching state on `open` if you need certainty.
 
 ## Options
 
-`url`, `eventTypes`, `params`, `withCredentials`, `reconnect`, `autoConnect` (default true; call `client.connect()` yourself when false), and for tests `EventSourceImpl`, `random`, `setTimeoutImpl`, `clearTimeoutImpl`.
+`url`, `eventTypes`, `params`, `withCredentials`, `reconnect`, `replay` (default true), `autoConnect` (default true; call `client.connect()` yourself when false), and for tests `EventSourceImpl`, `random`, `setTimeoutImpl`, `clearTimeoutImpl`.
 
 ## Tests
 

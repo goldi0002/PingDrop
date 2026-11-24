@@ -9,6 +9,9 @@ namespace PingDrop.Abstractions
 {
     internal interface INotificationFactory
     {
-        PDNotification CreateNotification<T>(T notification, string eventType, string? targetKey = null);
+        PDNotification CreateNotification<T>(T notification, string eventType, string? targetKey = null, IReadOnlyList<string>? targetKeys = null);
+
+        /// <summary>The newest event id issued by this factory (0 when none).</summary>
+        long LastIssuedId { get; }
     }
 }

@@ -30,5 +30,11 @@ namespace PingDrop.Internal
 
         [LoggerMessage(EventId = 8, Level = LogLevel.Warning, Message = "Failed to write a notification to a dashboard client.")]
         public static partial void DashboardWriteFailed(ILogger logger, Exception exception);
+
+        [LoggerMessage(EventId = 9, Level = LogLevel.Debug, Message = "Replayed {Count} missed event(s) to client {ConnectionId} after Last-Event-ID {LastEventId}.")]
+        public static partial void EventsReplayed(ILogger logger, int count, long connectionId, long lastEventId);
+
+        [LoggerMessage(EventId = 10, Level = LogLevel.Debug, Message = "Not replaying to client {ConnectionId}: Last-Event-ID {LastEventId} is newer than the newest event id issued ({NewestId}); ids restart with the process.")]
+        public static partial void ReplaySkippedUnknownId(ILogger logger, long connectionId, long lastEventId, long newestId);
     }
 }

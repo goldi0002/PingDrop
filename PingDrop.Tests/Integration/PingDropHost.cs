@@ -69,11 +69,12 @@ public sealed class PingDropHost : IAsyncDisposable
     }
 
     /// <summary>Opens an SSE stream and waits until the server has registered the connection.</summary>
-    public async Task<SseStream> ConnectAsync(string? userId = null, string? eventTypes = null)
+    public async Task<SseStream> ConnectAsync(string? userId = null, string? eventTypes = null, string? lastEventIdHeader = null, string? lastEventIdQuery = null)
     {
         var qs = new List<string>();
         if (userId != null) qs.Add($"uId={userId}");
         if (eventTypes != null) qs.Add($"eventType={eventTypes}");
+        if (lastEventIdQuery != null) qs.Add($"lastEventId={lastEventIdQuery}");
         var url = "/pingdrop/stream" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
 
         int before;
@@ -81,7 +82,9 @@ public sealed class PingDropHost : IAsyncDisposable
 
         // The server flushes headers as soon as the client is registered, so this returns promptly.
         var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-        var responseTask = Client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        if (lastEventIdHeader != null) request.Headers.TryAddWithoutValidation("Last-Event-ID", lastEventIdHeader);
+        var responseTask = Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
         await responseTask.WaitAsync(TimeSpan.FromSeconds(5));
         await WaitUntilAsync(() => { lock (Connected) return Connected.Count > before; });
         return new SseStream(responseTask, cts);
@@ -124,7 +127,16 @@ public sealed class SseStream : IAsyncDisposable
     public Task<HttpResponseMessage> GetResponseAsync() => _responseTask;
 
     /// <summary>Reads the next complete SSE frame (id/event/data).</summary>
-    public async Task<(string? Id, string? Event, string? Data)> ReadEventAsync()
+    public Task<(string? Id, string? Event, string? Data)> ReadEventAsync()
+    {
+        // A read that is still pending (e.g. a "nothing arrives" probe that timed out) is reused, so reads never overlap.
+        if (_pendingEvent is { IsCompleted: false } pending) return pending;
+        return _pendingEvent = ReadEventCoreAsync();
+    }
+
+    private Task<(string? Id, string? Event, string? Data)>? _pendingEvent;
+
+    private async Task<(string? Id, string? Event, string? Data)> ReadEventCoreAsync()
     {
         if (_reader is null)
         {

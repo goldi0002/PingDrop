@@ -19,6 +19,11 @@ export interface PingDropClientOptions {
   withCredentials?: boolean;
   /** Backoff settings, or false to never reconnect after the browser gives up. */
   reconnect?: ReconnectOptions | false;
+  /**
+   * On a manual reconnect (after the browser gave up), send the last seen event id as `?lastEventId=N` so the server
+   * can replay events missed in the gap. Default true. Ignored when `params.lastEventId` is set.
+   */
+  replay?: boolean;
   /** Connect in the constructor. Default true. */
   autoConnect?: boolean;
   /** Custom EventSource constructor (tests, polyfills). */
@@ -35,6 +40,8 @@ export class PingDropClient {
   /** The final URL including query parameters. */
   readonly url: string;
   readonly state: PingDropState;
+  /** Id of the newest event delivered to a handler, or null. Only events with a registered handler are tracked. */
+  readonly lastEventId: string | null;
   /** Native EventSource readyState (0, 1, 2); 2 when there is no connection. */
   readonly readyState: number;
   on(name: 'open' | 'close', handler: () => void): this;

@@ -20,7 +20,8 @@ The delegate runs once, when `AddPingDrop` is called. Options are read from the 
 | `AuthorizationPolicy` | `string?` | `null` | Name of an authorization policy required to connect to the SSE endpoint. `null` means the endpoint is anonymous. |
 | `HeartbeatInterval` | `TimeSpan` | 15 seconds | How often a `: ping` comment is written to an idle connection, so proxies and load balancers do not close it and dead peers are noticed. Zero or negative disables heartbeats. |
 | `ClientRetryInterval` | `TimeSpan` | 3 seconds | Reconnect delay suggested to clients with an SSE `retry:` field, sent once when a stream opens. Zero or negative omits the hint (the client uses its own default). |
-| `EventHistorySize` | `int` | `50` | Number of recent events kept in memory. Used by the dashboard only; it is not replayed to clients. |
+| `EventHistorySize` | `int` | `50` | Number of recent events kept in memory. Feeds the dashboard and bounds how many missed events can be replayed to a reconnecting client. |
+| `EnableReplay` | `bool` | `true` | Replay retained events a reconnecting client missed, using `Last-Event-ID` (header) or `lastEventId` (query). See [`EnableReplay`](#enablereplay). |
 | `ClientQueueCapacity` | `int` | `20` | Maximum notifications queued per connected client. Must be at least 1; smaller values throw `ArgumentOutOfRangeException`. |
 | `ClientQueueFullMode` | `PingDropQueueFullMode` | `DropOldest` | What happens when a client's queue is full: `DropOldest`, `DropNewest` or `DisconnectClient`. |
 | `EnableDashboard` | `bool` | `true` | Whether to map the dashboard. See [Dashboard](dashboard.md) for the Development-only default. |
@@ -43,7 +44,18 @@ Sent as `retry: <milliseconds>` at the start of every stream. Browsers use it as
 
 ### `EventHistorySize`
 
-A fixed-size ring buffer. Values below 1 are treated as 1. An event is recorded only when at least one connection exists to consider it: a broadcast with no connections, or a `SendToAsync` for a key nobody holds, is not recorded.
+A fixed-size ring buffer. Values below 1 are treated as 1. With `EnableReplay` on (the default) every broadcast and send is recorded, even when nobody is connected, so a client can catch up after a gap. With `EnableReplay` off, an event is recorded only when at least one connection exists to consider it: a broadcast with no connections, or a `SendToAsync` for a key nobody holds, is not recorded.
+
+### `EnableReplay`
+
+When a client connects with a `Last-Event-ID` request header (sent automatically by `EventSource` when it reconnects) or a `lastEventId` query parameter (for clients that recreate the `EventSource` themselves; the header wins if both are present), the server first writes the retained events with a larger id, in id order, then continues with live events, with no duplicates and no gap. A client only gets what it would have received live: broadcasts, events sent to its subscriber key (including multi-key sends), filtered by its `eventType` list. Clients without a key get broadcasts only. The dashboard feed is never replayed.
+
+Rules and limits:
+
+- Replay is limited to the last `EventHistorySize` events and lives in memory only.
+- Ids restart at 1 on every process start. If the supplied id is greater than the newest id the process has issued (typical after a restart), nothing is replayed; an invalid (non-numeric or negative) id is ignored.
+- Replayed events are written straight to the response, not through the per-client queue, so a gap larger than `ClientQueueCapacity` is not lost. They count toward the client's delivery counters and the attempted/successful delivery metrics, but not toward "Events Published".
+- Set `EnableReplay = false` to turn the feature off entirely (the header and parameter are then ignored and events are not recorded when nobody is connected).
 
 ### `ClientQueueCapacity` / `ClientQueueFullMode`
 

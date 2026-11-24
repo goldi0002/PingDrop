@@ -43,6 +43,16 @@ namespace PingDrop.Abstractions
         public TimeSpan ClientRetryInterval { get; set; } = TimeSpan.FromSeconds(3);
 
         /// <summary>
+        /// When true (the default), a client that reconnects with a <c>Last-Event-ID</c> header (or a <c>lastEventId</c> query
+        /// parameter) is sent the retained events it missed before live events resume.
+        /// </summary>
+        /// <remarks>Best effort: replay is limited to the last <see cref="EventHistorySize"/> events, held in memory, and event
+        /// ids restart at 1 on every process start (a <c>Last-Event-ID</c> newer than any id issued replays nothing). While
+        /// enabled, events are also recorded when no matching client is connected, so a client that was the only
+        /// listener can catch up. The dashboard feed is never replayed.</remarks>
+        public bool EnableReplay { get; set; } = true;
+
+        /// <summary>
         /// Gets or sets the maximum number of events to retain in the event history.
         /// </summary>
         public int EventHistorySize { get; set; } = 50;

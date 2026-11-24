@@ -38,7 +38,7 @@ In a fresh cloud container the SDK may be missing. `apt-get update && apt-get in
 - `PingDropHub` is the central singleton. It is registered as the concrete type and aliased as `IPingDropService`. It resolves the target connections, builds a `PDNotification` through `INotificationFactory`, records it in `IEventHistoryStore`, and fans it out to the matching `PDClientConnection`s. It also keeps the delivery counters (published, attempted, successful, dropped) with `Interlocked`, and emits `Activity` spans through an `ActivitySource`.
 - `PDConnectionStore` indexes connections by connection id and by subscriber key, which is how `SendToAsync(key, ...)` finds its targets.
 - `PDClientConnection` is one SSE client. It writes through `PDSseWriter`, and a client can restrict itself to certain event types (`HasSubscriptions` / `IsSubscribedTo`).
-- `PDEventHistoryStore` is a bounded ring of recent events.
+- `PDEventHistoryStore` is a bounded ring of recent events. It also backs `Last-Event-ID` replay: `HandleSseConnection` registers the client, then writes `PingDropHub.GetReplayEvents` straight to the response (looping until a snapshot is empty), then drains the queue skipping ids already sent. `PingDropHub.Publish` holds a lock around create/record/deliver so ids, history and queue order agree; that ordering is what makes replay gap-free. `PDReplay` holds the entitlement and parsing rules (structured `PDNotification.TargetKeys`).
 
 **Dashboard** (`Dashboard/` and `DashboardService`):
 - `Index.html`, `app.css` and `app.js` are compiled in as `EmbeddedResource` and read at runtime through `PDEmbeddedFileProvider.ReadAsync`. The resource name is `PingDrop.Dashboard.<file>`, so keep new dashboard assets in that folder and namespace.

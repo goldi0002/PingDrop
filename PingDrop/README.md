@@ -61,7 +61,8 @@ builder.Services.AddPingDrop(o =>
 | `AuthorizationPolicy` | `null` | Authorization policy required to connect to the SSE endpoint; `null` means anonymous |
 | `HeartbeatInterval` | 15 s | How often a `: ping` comment is sent to idle connections (zero disables) |
 | `ClientRetryInterval` | 3 s | Reconnect delay hint sent to clients as SSE `retry:` (zero omits) |
-| `EventHistorySize` | `50` | Recent events kept in memory for the dashboard (not replayed to clients) |
+| `EventHistorySize` | `50` | Recent events kept in memory for the dashboard and for `Last-Event-ID` replay |
+| `EnableReplay` | `true` | Replay retained events a reconnecting client missed (`Last-Event-ID` header or `lastEventId` query) |
 | `EnableDashboard` | `true` | Serve the built-in dashboard |
 | `Dashboard.Title` | `PingDrop Dashboard` | Dashboard title |
 | `Dashboard.AuthorizationPolicy` | `null` | Authorization policy required for every dashboard route |
@@ -87,7 +88,7 @@ Call `UseAuthentication()` and `UseAuthorization()` before `MapPingDrop()`.
 
 ## Limits
 
-Single node, in-memory only: no backplane, no replay of missed events (`Last-Event-ID` is ignored), and each client has a 20-event queue that drops the oldest events when full. Behind nginx/IIS/Azure/Cloudflare, disable response buffering and keep proxy idle timeouts above `HeartbeatInterval`.
+Single node, in-memory only: no backplane, best-effort replay of missed events on reconnect (limited to `EventHistorySize`, in memory, ids restart with the process), and each client has a 20-event queue that drops the oldest events when full. Behind nginx/IIS/Azure/Cloudflare, disable response buffering and keep proxy idle timeouts above `HeartbeatInterval`.
 
 ## Documentation
 
