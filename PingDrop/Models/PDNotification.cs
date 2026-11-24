@@ -16,5 +16,8 @@
         /// <summary>The structured list of subscriber keys this event was sent to, or <see langword="null"/> for a broadcast.</summary>
         public IReadOnlyList<string>? TargetKeys { get; init; }
         public DateTime TimestampUtc { get; init; }
+
+        /// <summary>Cached UTF-8 SSE frame (see <c>PDSseWriter.GetFrame</c>); built lazily and shared by all clients.</summary>
+        internal byte[]? SseFrame;
     }
 }

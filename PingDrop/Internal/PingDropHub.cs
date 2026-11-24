@@ -42,7 +42,7 @@ namespace PingDrop.Internal
             ArgumentNullException.ThrowIfNull(notification);
             cancellationToken.ThrowIfCancellationRequested();
 
-            Publish(notification, eventType, null, null, () => _connectionStore.GetAll().ToList(), "PingDrop.Broadcast", null);
+            Publish(notification, eventType, null, null);
 
             return ValueTask.CompletedTask;
         }
@@ -58,7 +58,7 @@ namespace PingDrop.Internal
                 return ValueTask.CompletedTask;
             }
 
-            Publish(notification, eventType, targetKey, [targetKey], () => _connectionStore.GetByKey(targetKey).ToList(), "PingDrop.SendTo", targetKey);
+            Publish(notification, eventType, targetKey, null);
 
             return ValueTask.CompletedTask;
         }
@@ -85,25 +85,27 @@ namespace PingDrop.Internal
             }
 
             string joinedKeys = string.Join(",", keys);
-            Publish(notification, eventType, joinedKeys, keys, () => keys.SelectMany(_connectionStore.GetByKey).Distinct().ToList(), "PingDrop.SendTo", joinedKeys);
+            Publish(notification, eventType, joinedKeys, keys);
 
             return ValueTask.CompletedTask;
         }
 
         /// <summary>
-        /// Creates, records and delivers one event. The whole sequence runs under one lock so that event ids, history order and
+        /// Creates, records and delivers one event. Serialization happens first, outside the lock; then the id assignment, the
+        /// history entry, the recipient lookup and the delivery run under one lock so that event ids, history order and
         /// per-client queue order all agree. Replay relies on this: a client that registers and then snapshots the history
         /// either sees an event in the snapshot (it was recorded first) or receives it live (it was delivered after the
         /// client registered), and ids in both sources are strictly increasing.
+        /// <paramref name="targetKey"/> is null for a broadcast; <paramref name="targetKeys"/> is null for a single-key send
+        /// (the notification then carries <c>[targetKey]</c>) and holds the distinct keys for a multi-key send.
         /// </summary>
-        private void Publish<T>(T notification, string eventType, string? targetKey, IReadOnlyList<string>? targetKeys,
-            Func<List<PDClientConnection>> resolveClients, string activityName, string? subscriberKeyTag)
+        private void Publish<T>(T notification, string eventType, string? targetKey, IReadOnlyList<string>? targetKeys)
         {
-            // With a payload limit, serialize (once) and measure before taking the lock, so an oversize payload throws before any id
-            // is consumed or anything is recorded, whether or not anyone is connected. Without a limit nothing extra is done here.
             string? payloadJson = null;
             if (_maxPayloadBytes is int maxPayloadBytes)
             {
+                // With a payload limit, measure before taking the lock, so an oversize payload throws before any id
+                // is consumed or anything is recorded, whether or not anyone is connected.
                 payloadJson = JsonSerializer.Serialize(notification);
                 int size = Encoding.UTF8.GetByteCount(payloadJson);
                 if (size > maxPayloadBytes)
@@ -111,27 +113,32 @@ namespace PingDrop.Internal
                     throw new PingDropPayloadTooLargeException(size, maxPayloadBytes);
                 }
             }
+            else if (!_replayEnabled && !HasRecipients(targetKey, targetKeys))
+            {
+                // Nobody to receive it and nothing to record: skip the serialization and the lock.
+                return;
+            }
+
+            payloadJson ??= JsonSerializer.Serialize(notification);
 
             lock (_publishLock)
             {
                 // Peek at the recipients first so that, with replay off, an event nobody receives does not consume an id.
-                if (!_replayEnabled && resolveClients().Count == 0)
+                if (!_replayEnabled && !HasRecipients(targetKey, targetKeys))
                 {
                     return;
                 }
 
-                PDNotification pdNotification = payloadJson is null
-                    ? _notificationFactory.CreateNotification(notification, eventType, targetKey, targetKeys)
-                    : _notificationFactory.CreateNotificationFromJson(payloadJson, eventType, targetKey, targetKeys);
+                PDNotification pdNotification = _notificationFactory.CreateNotificationFromJson(payloadJson, eventType, targetKey, targetKeys);
 
                 // Record before resolving recipients: a client that registered before this point and snapshots the history
                 // later may or may not see this event in the snapshot, but it is then guaranteed to be among the recipients
                 // below if it did not.
                 _eventHistoryStore.AddEvent(pdNotification);
 
-                List<PDClientConnection> clients = resolveClients();
+                PDClientConnection[] clients = ResolveRecipients(targetKey, targetKeys);
 
-                if (clients.Count == 0)
+                if (clients.Length == 0)
                 {
                     // Nobody is connected: the event is kept for replay only. It is not counted as published because it
                     // was not delivered to anyone.
@@ -140,19 +147,68 @@ namespace PingDrop.Internal
 
                 Interlocked.Increment(ref _totalEventsPublished);
 
-                using Activity? activity = _activitySource.StartActivity(activityName, ActivityKind.Internal);
+                using Activity? activity = _activitySource.StartActivity(targetKey is null ? "PingDrop.Broadcast" : "PingDrop.SendTo", ActivityKind.Internal);
 
                 activity?.SetTag(InternalConstants.EventTypeTag, eventType);
                 activity?.SetTag(InternalConstants.EventIdTag, pdNotification.Id);
                 activity?.SetTag(InternalConstants.EventPayloadSizeTag, pdNotification.Payload?.Length);
-                if (subscriberKeyTag is not null)
+                if (targetKey is not null)
                 {
-                    activity?.SetTag(InternalConstants.SubscriberKeyTag, subscriberKeyTag);
+                    activity?.SetTag(InternalConstants.SubscriberKeyTag, targetKey);
                 }
-                activity?.SetTag(InternalConstants.ClientsCountTag, clients.Count);
+                activity?.SetTag(InternalConstants.ClientsCountTag, clients.Length);
 
                 DeliverNotification(pdNotification, eventType, clients);
             }
+        }
+
+        private bool HasRecipients(string? targetKey, IReadOnlyList<string>? targetKeys)
+        {
+            if (targetKey is null) return _connectionStore.GetAll().Length > 0;
+            if (targetKeys is null) return _connectionStore.GetByKey(targetKey).Length > 0;
+
+            foreach (string key in targetKeys)
+            {
+                if (_connectionStore.GetByKey(key).Length > 0) return true;
+            }
+            return false;
+        }
+
+        // A connection has exactly one key and the keys are distinct, so concatenating the per-key snapshots has no duplicates.
+        private PDClientConnection[] ResolveRecipients(string? targetKey, IReadOnlyList<string>? targetKeys)
+        {
+            if (targetKey is null) return _connectionStore.GetAll();
+            if (targetKeys is null) return _connectionStore.GetByKey(targetKey);
+
+            PDClientConnection[]? single = null;
+            int nonEmpty = 0;
+            foreach (string key in targetKeys)
+            {
+                PDClientConnection[] bucket = _connectionStore.GetByKey(key);
+                if (bucket.Length > 0)
+                {
+                    single ??= bucket;
+                    nonEmpty++;
+                }
+            }
+            if (nonEmpty <= 1) return single ?? [];
+
+            var buckets = new PDClientConnection[targetKeys.Count][];
+            int total = 0;
+            for (int i = 0; i < buckets.Length; i++)
+            {
+                buckets[i] = _connectionStore.GetByKey(targetKeys[i]);
+                total += buckets[i].Length;
+            }
+
+            var result = new PDClientConnection[total];
+            int offset = 0;
+            foreach (PDClientConnection[] bucket in buckets)
+            {
+                bucket.CopyTo(result, offset);
+                offset += bucket.Length;
+            }
+            return result;
         }
 
         /// <summary>The newest event id this process has issued (0 when none).</summary>
@@ -174,7 +230,7 @@ namespace PingDrop.Internal
             return PDReplay.Select(_eventHistoryStore.GetAll(), client, lastEventId);
         }
 
-        private void DeliverNotification(PDNotification notification, string eventType, IEnumerable<PDClientConnection> clients)
+        private void DeliverNotification(PDNotification notification, string eventType, PDClientConnection[] clients)
         {
             int attempted = 0;
             int successful = 0;
