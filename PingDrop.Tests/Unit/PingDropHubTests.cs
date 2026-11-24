@@ -32,6 +32,50 @@ public class PingDropHubTests
     }
 
     [Fact]
+    public async Task Broadcast_WithOnlyDashboardConnection_IsNoOp()
+    {
+        var (hub, store, history) = Create();
+        var dash = store.Add(null, InternalConstants.DashboardSubscriberKey);
+
+        await hub.BroadcastAsync("x", "evt");
+
+        Assert.Equal(0, dash.PendingNotifications);
+        Assert.Equal(0, history.Count);
+        Assert.Equal(0, hub.TotalEventsPublished);
+        Assert.Equal(0, hub.ConnectedClientsCount);
+    }
+
+    [Fact]
+    public async Task Broadcast_SkipsDashboardConnection()
+    {
+        var (hub, store, history) = Create();
+        var a = store.Add(null, "u1");
+        var dash = store.Add(null, InternalConstants.DashboardSubscriberKey);
+
+        await hub.BroadcastAsync("x", "evt");
+
+        Assert.Equal(1, a.PendingNotifications);
+        Assert.Equal(0, dash.PendingNotifications);
+        Assert.Equal(1, hub.ConnectedClientsCount);
+        Assert.Equal(1, hub.AttemptedDeliveries);
+    }
+
+    [Fact]
+    public async Task SendTo_DashboardKey_IsNoOp_ForSingleAndMultiKey()
+    {
+        var (hub, store, history) = Create();
+        var dash = store.Add(null, InternalConstants.DashboardSubscriberKey);
+        var a = store.Add(null, "u1");
+
+        await hub.SendToAsync(InternalConstants.DashboardSubscriberKey, "x", "evt");
+        await hub.SendToAsync(new[] { InternalConstants.DashboardSubscriberKey, "u1" }, "x", "evt");
+
+        Assert.Equal(0, dash.PendingNotifications);
+        Assert.Equal(1, a.PendingNotifications);
+        Assert.Equal(1, hub.TotalEventsPublished);
+    }
+
+    [Fact]
     public async Task Broadcast_WithNoClients_IsNoOp()
     {
         var (hub, _, history) = Create();

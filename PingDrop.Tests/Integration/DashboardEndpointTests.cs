@@ -137,4 +137,47 @@ public class DashboardEndpointTests
 
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
     }
+
+    private static async Task<SseStream> ConnectDashboardAsync(PingDropHost host)
+    {
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var task = host.Client.GetAsync($"{Base}/sse", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        await task.WaitAsync(TimeSpan.FromSeconds(5));
+        return new SseStream(task, cts);
+    }
+
+    [Fact]
+    public async Task DashboardConnection_IsExcludedFromMetricsAndConnections()
+    {
+        await using var host = await PingDropHost.StartAsync();
+        await using var dash = await ConnectDashboardAsync(host);
+
+        var conns = await host.Client.GetStringAsync($"{Base}/connections");
+        var metrics = await host.Client.GetFromJsonAsync<JsonElement>($"{Base}/metrics");
+        var connected = metrics.GetProperty("data").EnumerateArray()
+            .First(m => m.GetProperty("label").GetString() == "Connected Clients").GetProperty("value").GetString();
+
+        Assert.DoesNotContain("__pingdrop_dashboard__", conns);
+        Assert.Equal("0", connected);
+    }
+
+    [Fact]
+    public async Task DashboardFeed_StillReceivesMetricsAndLogEvents()
+    {
+        await using var host = await PingDropHost.StartAsync();
+        await using var alice = await host.ConnectAsync("alice");
+        await using var dash = await ConnectDashboardAsync(host);
+
+        var res = await host.Client.PostAsJsonAsync($"{Base}/send-notification", Req("broadcast"));
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+
+        var seen = new HashSet<string>();
+        for (int i = 0; i < 6 && !(seen.Contains("metrics")); i++)
+        {
+            var (_, evt, _) = await dash.ReadEventAsync();
+            seen.Add(evt!);
+            Assert.NotEqual("evt", evt);
+        }
+        Assert.Contains("metrics", seen);
+    }
 }

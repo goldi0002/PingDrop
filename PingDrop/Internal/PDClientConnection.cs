@@ -24,6 +24,9 @@ namespace PingDrop.Internal
 
         public string? SubscriberKey { get; }
 
+        /// <summary>True for the dashboard's own live feed, which is internal and not a user-facing client.</summary>
+        public bool IsDashboard => SubscriberKey == InternalConstants.DashboardSubscriberKey;
+
         public Channel<PDNotification> NotificationChannel { get; }
 
         public DateTime ConnectedAtUtc { get; }
