@@ -13,9 +13,11 @@ namespace PingDrop.Abstractions
         /// </summary>
         PDConnectionRejection TryAdd(HashSet<string>? eventTypes, string? subscriberKey, PDConnectionLimits limits, out PDClientConnection? client);
         void Remove(long connectionId);
-        IEnumerable<PDClientConnection> GetAll();
+        /// <summary>A snapshot of the user-facing connections (not the dashboard feed). Shared and immutable: do not modify it.</summary>
+        PDClientConnection[] GetAll();
         /// <summary>Every connection including the internal dashboard feed (used for shutdown).</summary>
         IEnumerable<PDClientConnection> GetAllIncludingDashboard();
-        IEnumerable<PDClientConnection> GetByKey(string subscriberKey);
+        /// <summary>A snapshot of the connections registered under a key. Shared and immutable: do not modify it.</summary>
+        PDClientConnection[] GetByKey(string subscriberKey);
     }
 }

@@ -60,4 +60,12 @@ public class SseFrameBenchmarks
 
     [Benchmark]
     public async Task WriteFrame() => await PDSseWriter.WriteAsync(_response, _notification);
+
+    /// <summary>The first write of an event: encodes the frame, which is then cached for every other client.</summary>
+    [Benchmark]
+    public async Task FirstWriteOfEvent()
+    {
+        var fresh = new PDNotification { Id = _notification.Id, EventType = _notification.EventType, Payload = _notification.Payload };
+        await PDSseWriter.WriteAsync(_response, fresh);
+    }
 }

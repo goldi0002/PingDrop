@@ -8,9 +8,12 @@ namespace PingDrop.Internal
         private readonly int _queueCapacity;
         private readonly PingDropQueueFullMode _queueFullMode;
         private readonly ConcurrentDictionary<long, PDClientConnection> _all = new();
-        private readonly ConcurrentDictionary<string, ConcurrentDictionary<long, PDClientConnection>> _byKey = new();
-        // All mutations (Add, TryAdd, Remove) run under this lock so the counters and the limit checks stay consistent;
-        // reads (GetAll, GetByKey, Count) stay lock-free. Connects and disconnects are rare next to sends.
+        // Copy-on-write snapshots, rebuilt on connect/disconnect and never mutated afterwards, so publishing iterates them
+        // lock-free and without allocating. _users excludes the dashboard feed.
+        private readonly ConcurrentDictionary<string, PDClientConnection[]> _byKey = new();
+        private PDClientConnection[] _users = [];
+        // All mutations (Add, TryAdd, Remove) run under this lock so the counters, the limit checks and the snapshots stay
+        // consistent; reads (GetAll, GetByKey, Count) stay lock-free. Connects and disconnects are rare next to sends.
         private readonly object _gate = new();
         private int _userCount;
         private int _dashboardCount;
@@ -26,7 +29,7 @@ namespace PingDrop.Internal
         public int CountByKey(string subscriberKey)
         {
             return !string.IsNullOrWhiteSpace(subscriberKey) && _byKey.TryGetValue(subscriberKey, out var bucket)
-            ? bucket.Count
+            ? bucket.Length
             : 0;
         }
 
@@ -87,28 +90,25 @@ namespace PingDrop.Internal
 
             _all[client.ConnectionId] = client;
 
-            if (client.IsDashboard) _dashboardCount++; else _userCount++;
+            if (client.IsDashboard) _dashboardCount++; else { _userCount++; _users = [.. _users, client]; }
 
             if (subscriberKey is not null)
             {
-                var bucket = _byKey.GetOrAdd(subscriberKey, _ => new ConcurrentDictionary<long, PDClientConnection>());
-                bucket[client.ConnectionId] = client;
+                _byKey[subscriberKey] = _byKey.TryGetValue(subscriberKey, out var bucket) ? [.. bucket, client] : [client];
             }
 
             return client;
         }
 
-        public IEnumerable<PDClientConnection> GetAll()
-        {
-            return _all.Values.Where(c => !c.IsDashboard);
-        }
+        // The returned arrays are shared snapshots: callers must not modify them.
+        public PDClientConnection[] GetAll() => Volatile.Read(ref _users);
 
         public IEnumerable<PDClientConnection> GetAllIncludingDashboard() => _all.Values;
 
-        public IEnumerable<PDClientConnection> GetByKey(string subscriberKey)
+        public PDClientConnection[] GetByKey(string subscriberKey)
         {
             return !string.IsNullOrWhiteSpace(subscriberKey) && _byKey.TryGetValue(subscriberKey, out var bucket)
-            ? bucket.Values
+            ? bucket
             : [];
         }
 
@@ -119,7 +119,7 @@ namespace PingDrop.Internal
                 if (!_all.TryRemove(connectionId, out var client))
                     return;
 
-                if (client.IsDashboard) _dashboardCount--; else _userCount--;
+                if (client.IsDashboard) _dashboardCount--; else { _userCount--; _users = Without(_users, client); }
 
                 if (string.IsNullOrWhiteSpace(client.SubscriberKey))
                     return;
@@ -127,11 +127,25 @@ namespace PingDrop.Internal
                 if (!_byKey.TryGetValue(client.SubscriberKey, out var bucket))
                     return;
 
-                bucket.TryRemove(connectionId, out _);
+                PDClientConnection[] remaining = Without(bucket, client);
 
-                if (bucket.IsEmpty)
+                if (remaining.Length == 0)
                     _byKey.TryRemove(client.SubscriberKey, out _);
+                else
+                    _byKey[client.SubscriberKey] = remaining;
             }
+        }
+
+        private static PDClientConnection[] Without(PDClientConnection[] source, PDClientConnection client)
+        {
+            int index = Array.IndexOf(source, client);
+            if (index < 0) return source;
+            if (source.Length == 1) return [];
+
+            var result = new PDClientConnection[source.Length - 1];
+            Array.Copy(source, 0, result, 0, index);
+            Array.Copy(source, index + 1, result, index, source.Length - index - 1);
+            return result;
         }
     }
 }

@@ -235,7 +235,8 @@ namespace PingDrop.Extensions
                 }
 
                 var channelReader = client.NotificationChannel.Reader;
-                while (await WaitToReadWithHeartbeatAsync(channelReader, context.Response, options.HeartbeatInterval, client, context.RequestAborted))
+                using var heartbeat = new PDHeartbeatWaiter(channelReader, context.Response, options.HeartbeatInterval, client, context.RequestAborted);
+                while (await heartbeat.WaitToReadAsync())
                 {
                     while (channelReader.TryRead(out var evt))
                     {
@@ -320,7 +321,8 @@ namespace PingDrop.Extensions
                 // Register first, then flush: once the client sees headers it is guaranteed to receive broadcasts.
                 await PDSseWriter.WriteConnectedAsync(context.Response, options.ClientRetryInterval, context.RequestAborted);
                 var channelReader = dashboardClient.NotificationChannel.Reader;
-                while (await WaitToReadWithHeartbeatAsync(channelReader, context.Response, options.HeartbeatInterval, dashboardClient, context.RequestAborted))
+                using var heartbeat = new PDHeartbeatWaiter(channelReader, context.Response, options.HeartbeatInterval, dashboardClient, context.RequestAborted);
+                while (await heartbeat.WaitToReadAsync())
                 {
                     while (channelReader.TryRead(out var log))
                     {
@@ -338,34 +340,6 @@ namespace PingDrop.Extensions
                 hub.RemoveClient(dashboardClient.ConnectionId);
             }
         }
-        /// <summary>
-        /// Waits for the next notification, writing a <c>: ping</c> comment every <paramref name="interval"/> while idle.
-        /// Returns false when the channel is completed. Heartbeats refresh connection activity but are not counted as deliveries.
-        /// </summary>
-        private static async ValueTask<bool> WaitToReadWithHeartbeatAsync(ChannelReader<PDNotification> reader, HttpResponse response,
-            TimeSpan interval, PDClientConnection client, CancellationToken cancellationToken)
-        {
-            if (interval <= TimeSpan.Zero)
-            {
-                return await reader.WaitToReadAsync(cancellationToken);
-            }
-
-            while (true)
-            {
-                using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(interval);
-                try
-                {
-                    return await reader.WaitToReadAsync(timeout.Token);
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                    await PDSseWriter.WriteCommentAsync(response, "ping", cancellationToken);
-                    client.MarkActivity();
-                }
-            }
-        }
-
         private static HashSet<string>? ParseEvents(string? value)
         {
             if (string.IsNullOrWhiteSpace(value))

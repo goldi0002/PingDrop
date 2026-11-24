@@ -35,7 +35,7 @@ Delivery order within one client is preserved for the events that remain. Events
 - One-way: server to browser. Clients cannot send messages over the stream; use ordinary HTTP requests for that.
 - Event-type filtering is by exact name (case-insensitive) and fixed at connect time.
 - Targeting is by one subscriber key per connection, set when the connection opens. A connection can hold exactly one key (or none). There is no group or topic abstraction beyond that.
-- Payloads are serialized once per send with `System.Text.Json` default options. There is no size limit unless you set `MaxPayloadBytes` (an oversize send then throws `PingDropPayloadTooLargeException`); each event is written separately to every recipient's stream, so keep payloads small.
+- Payloads are serialized once per send with `System.Text.Json` default options. There is no size limit unless you set `MaxPayloadBytes` (an oversize send then throws `PingDropPayloadTooLargeException`); each event is written separately to every recipient's stream (its frame is encoded once and the same bytes are copied to each client), so keep payloads small. See [Performance](performance.md) for measured costs.
 - Authorization is checked when the connection opens, not for every event. A stream stays open after a user's session or token expires. See [Authentication](authentication.md#authorization-and-long-lived-connections).
 - There is no API to disconnect a specific client or to list connections other than through the dashboard.
 
