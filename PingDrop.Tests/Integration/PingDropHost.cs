@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -6,7 +7,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using PingDrop.Abstractions;
 using PingDrop.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.Security.Claims;
 using System.Text;
+using System.Text.Encodings.Web;
 
 namespace PingDrop.Tests.Integration;
 
@@ -26,10 +31,18 @@ public sealed class PingDropHost : IAsyncDisposable
         Client.Timeout = TimeSpan.FromSeconds(30);
     }
 
-    public static async Task<PingDropHost> StartAsync(Action<PingDropOptions>? configure = null)
+    public static async Task<PingDropHost> StartAsync(
+        Action<PingDropOptions>? configure = null,
+        string environment = "Development",
+        bool withAuth = false)
     {
         PingDropHost? host = null;
-        var builder = WebApplication.CreateBuilder();
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
+        if (withAuth)
+        {
+            builder.Services.AddAuthentication(TestAuthHandler.Scheme).AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.Scheme, _ => { });
+            builder.Services.AddAuthorization(o => o.AddPolicy("Admin", p => p.RequireClaim("role", "admin")));
+        }
         builder.WebHost.UseTestServer();
         builder.Services.AddPingDrop(o =>
         {
@@ -39,6 +52,11 @@ public sealed class PingDropHost : IAsyncDisposable
             configure?.Invoke(o);
         });
         var app = builder.Build();
+        if (withAuth)
+        {
+            app.UseAuthentication();
+            app.UseAuthorization();
+        }
         app.MapPingDrop();
         await app.StartAsync();
         host = new PingDropHost(app);
@@ -127,5 +145,25 @@ public sealed class SseStream : IAsyncDisposable
         _cts.Cancel();
         _reader?.Dispose();
         try { (await _responseTask).Dispose(); } catch { /* aborted or never completed */ }
+    }
+}
+
+/// <summary>Header-driven auth: X-Test-User authenticates; X-Test-Role adds a "role" claim.</summary>
+public sealed class TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
+    : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+{
+    public const string Scheme = "Test";
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        if (!Request.Headers.TryGetValue("X-Test-User", out var user))
+            return Task.FromResult(AuthenticateResult.NoResult());
+
+        var claims = new List<Claim> { new(ClaimTypes.Name, user.ToString()) };
+        if (Request.Headers.TryGetValue("X-Test-Role", out var role))
+            claims.Add(new Claim("role", role.ToString()));
+
+        var ticket = new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme)), Scheme);
+        return Task.FromResult(AuthenticateResult.Success(ticket));
     }
 }

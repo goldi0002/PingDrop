@@ -2,6 +2,8 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using PingDrop.Abstractions;
 using PingDrop.Internal;
 using PingDrop.Models;
@@ -45,13 +47,39 @@ namespace PingDrop.Extensions
         {
             IServiceProvider? sp = endpoints.ServiceProvider;
             PingDropOptions? options = sp.GetRequiredService<PingDropOptions>();
-            endpoints.MapGet(options.EndpointPath ?? InternalConstants.DefaultEndpointPath, HandleSseConnection);
+            RouteHandlerBuilder stream = endpoints.MapGet(options.EndpointPath ?? InternalConstants.DefaultEndpointPath, HandleSseConnection);
+
+            if (!string.IsNullOrWhiteSpace(options.AuthorizationPolicy))
+            {
+                stream.RequireAuthorization(options.AuthorizationPolicy);
+            }
 
             if (options.EnableDashboard)
             {
+                bool secured = !string.IsNullOrWhiteSpace(options.Dashboard.AuthorizationPolicy);
+                IHostEnvironment? environment = sp.GetService<IHostEnvironment>();
+
+                if (!secured && !options.Dashboard.AllowAnonymous && environment is not null && !environment.IsDevelopment())
+                {
+                    sp.GetService<ILoggerFactory>()?.CreateLogger("PingDrop").LogWarning(
+                        "The PingDrop dashboard is enabled but was not mapped: it has no authorization policy and the environment is '{Environment}'. " +
+                        "Set PingDropOptions.Dashboard.AuthorizationPolicy (recommended), set Dashboard.AllowAnonymous = true, or set EnableDashboard = false.",
+                        environment.EnvironmentName);
+
+                    return endpoints;
+                }
+
                 options.Dashboard.EndpointPath = options.EndpointPath ?? InternalConstants.DefaultEndpointPath;
-                endpoints.MapGet(options.Dashboard.Path + "/sse", HandleDashboardSseConnection);
-                return endpoints.MapDashboard(options);
+
+                // All dashboard routes go through one group so the policy is applied to every one of them.
+                RouteGroupBuilder dashboard = endpoints.MapGroup(string.Empty);
+                dashboard.MapGet(options.Dashboard.Path + "/sse", HandleDashboardSseConnection);
+                dashboard.MapDashboard(options);
+
+                if (secured)
+                {
+                    dashboard.RequireAuthorization(options.Dashboard.AuthorizationPolicy!);
+                }
             }
 
             return endpoints;
