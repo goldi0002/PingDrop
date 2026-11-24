@@ -35,9 +35,18 @@ Delivery order within one client is preserved for the events that remain. Events
 - One-way: server to browser. Clients cannot send messages over the stream; use ordinary HTTP requests for that.
 - Event-type filtering is by exact name (case-insensitive) and fixed at connect time.
 - Targeting is by one subscriber key per connection, set when the connection opens. A connection can hold exactly one key (or none). There is no group or topic abstraction beyond that.
-- Payloads are serialized once per send with `System.Text.Json` default options. PingDrop enforces no size limit, but each event is written separately to every recipient's stream, so keep payloads small.
+- Payloads are serialized once per send with `System.Text.Json` default options. There is no size limit unless you set `MaxPayloadBytes` (an oversize send then throws `PingDropPayloadTooLargeException`); each event is written separately to every recipient's stream, so keep payloads small.
 - Authorization is checked when the connection opens, not for every event. A stream stays open after a user's session or token expires. See [Authentication](authentication.md#authorization-and-long-lived-connections).
 - There is no API to disconnect a specific client or to list connections other than through the dashboard.
+
+## Limits you can set
+
+Everything below is unlimited by default and is enforced per process (with several instances each applies its own limit). See [Configuration](configuration.md#limits).
+
+- `MaxConnectionsPerKey` (429) and `MaxTotalConnections` (503) refuse new SSE connections with a `Retry-After` header. Browsers' `EventSource` does not retry after a non-200 answer, so a bare `EventSource` page has to retry itself (the bundled JavaScript client retries with backoff). The dashboard's live feed is not counted; it has its own cap, `Dashboard.MaxFeedConnections` (default 10).
+- `MaxPayloadBytes` makes oversize sends throw; the dashboard's send endpoint answers 413.
+- `Dashboard.MaxSendsPerMinute` rate-limits the dashboard's send endpoint (429, fixed window, in memory). It does not limit your own `IPingDropService` calls, and PingDrop has no limit on how fast application code may publish.
+- There is no per-IP limit and no limit on the size of a request to the dashboard's send endpoint beyond ASP.NET Core's own request limits.
 
 ## Browser and network limits
 

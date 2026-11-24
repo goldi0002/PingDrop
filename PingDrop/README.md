@@ -62,11 +62,15 @@ builder.Services.AddPingDrop(o =>
 | `HeartbeatInterval` | 15 s | How often a `: ping` comment is sent to idle connections (zero disables) |
 | `ClientRetryInterval` | 3 s | Reconnect delay hint sent to clients as SSE `retry:` (zero omits) |
 | `EventHistorySize` | `50` | Recent events kept in memory for the dashboard and for `Last-Event-ID` replay |
+| `MaxConnectionsPerKey` / `MaxTotalConnections` | `null` | Cap simultaneous connections per subscriber key (HTTP 429) / in total (HTTP 503); both answer with `Retry-After` |
+| `MaxPayloadBytes` | `null` | Largest serialized payload in UTF-8 bytes; larger sends throw `PingDropPayloadTooLargeException` (dashboard: 413) |
 | `EnableReplay` | `true` | Replay retained events a reconnecting client missed (`Last-Event-ID` header or `lastEventId` query) |
 | `EnableDashboard` | `true` | Serve the built-in dashboard |
 | `Dashboard.Title` | `PingDrop Dashboard` | Dashboard title |
 | `Dashboard.AuthorizationPolicy` | `null` | Authorization policy required for every dashboard route |
 | `Dashboard.AllowAnonymous` | `false` | Allow the dashboard without a policy outside Development |
+| `Dashboard.MaxSendsPerMinute` | `null` | Rate limit for the dashboard's send endpoint (429 + `Retry-After`) |
+| `Dashboard.MaxFeedConnections` | `10` | Cap on open dashboard live feeds (503 + `Retry-After`) |
 | `ClientConnected` / `ClientDisconnected` | `null` | Async callbacks receiving the connection id |
 | `TargetKeyResolver` | `null` | Resolves the subscriber key from `HttpContext` |
 

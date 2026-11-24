@@ -16,7 +16,11 @@ namespace PingDrop.Internal
 
         public PDNotification CreateNotification<T>(T notification, string eventType, string? targetKey = null, IReadOnlyList<string>? targetKeys = null)
         {
-            var payloadJson = JsonSerializer.Serialize(notification);
+            return CreateNotificationFromJson(JsonSerializer.Serialize(notification), eventType, targetKey, targetKeys);
+        }
+
+        public PDNotification CreateNotificationFromJson(string payloadJson, string eventType, string? targetKey = null, IReadOnlyList<string>? targetKeys = null)
+        {
             return new PDNotification
             {
                 Id = Interlocked.Increment(ref _eventId),
