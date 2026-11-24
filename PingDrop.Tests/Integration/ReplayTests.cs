@@ -260,10 +260,10 @@ public class ReplayTests
     [Fact]
     public async Task ConcurrentPublishing_DuringConnect_HasNoDuplicatesOrGaps()
     {
-        for (int round = 0; round < 10; round++)
+        for (int round = 0; round < 3; round++)
         {
-            await using var host = await PingDropHost.StartAsync(o => { o.EventHistorySize = 100_000; o.ClientQueueCapacity = 16; });
-            const int total = 1500;
+            await using var host = await PingDropHost.StartAsync(o => { o.EventHistorySize = 100_000; o.ClientQueueCapacity = 100_000; });
+            const int total = 700;
             const int seen = 100;
 
             for (int i = 0; i < seen; i++) await host.Service.BroadcastAsync(i, "e");

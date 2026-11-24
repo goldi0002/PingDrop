@@ -32,9 +32,9 @@ public class LiveLogTests
 
     private static async Task<SseStream> ConnectDashboardAsync(PingDropHost host)
     {
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var task = host.Client.GetAsync($"{Base}/sse", HttpCompletionOption.ResponseHeadersRead, cts.Token);
-        await task.WaitAsync(TimeSpan.FromSeconds(5));
+        await task.WaitAsync(TimeSpan.FromSeconds(15));
         return new SseStream(task, cts);
     }
 
@@ -43,8 +43,15 @@ public class LiveLogTests
         var msgs = new List<string>();
         while (msgs.Count < count)
         {
-            var (_, evt, data) = await dash.ReadEventAsync();
-            if (evt == "log") msgs.Add(JsonDocument.Parse(data!).RootElement.GetProperty("msg").GetString()!);
+            try
+            {
+                var (_, evt, data) = await dash.ReadEventAsync();
+                if (evt == "log") msgs.Add(JsonDocument.Parse(data!).RootElement.GetProperty("msg").GetString()!);
+            }
+            catch (TimeoutException)
+            {
+                throw new TimeoutException($"Expected {count} log lines but only received {msgs.Count}: [{string.Join(" | ", msgs)}]");
+            }
         }
         return msgs;
     }

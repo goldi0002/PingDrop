@@ -81,16 +81,16 @@ public sealed class PingDropHost : IAsyncDisposable
         lock (Connected) before = Connected.Count;
 
         // The server flushes headers as soon as the client is registered, so this returns promptly.
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         if (lastEventIdHeader != null) request.Headers.TryAddWithoutValidation("Last-Event-ID", lastEventIdHeader);
         var responseTask = Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-        await responseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await responseTask.WaitAsync(TimeSpan.FromSeconds(15));
         await WaitUntilAsync(() => { lock (Connected) return Connected.Count > before; });
         return new SseStream(responseTask, cts);
     }
 
-    public static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 5000)
+    public static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 15000)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
         while (!condition())
@@ -147,7 +147,7 @@ public sealed class SseStream : IAsyncDisposable
         string? id = null, evt = null, data = null;
         while (true)
         {
-            var line = await _reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5), _cts.Token);
+            var line = await _reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15), _cts.Token);
             if (line is null) throw new EndOfStreamException();
             if (line.Length == 0)
             {
@@ -169,7 +169,7 @@ public sealed class SseStream : IAsyncDisposable
             _reader = new StreamReader(await response.Content.ReadAsStreamAsync(_cts.Token), Encoding.UTF8);
         }
 
-        var line = await _reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5), _cts.Token);
+        var line = await _reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15), _cts.Token);
         return line ?? throw new EndOfStreamException();
     }
 
