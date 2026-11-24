@@ -1,4 +1,4 @@
-using PingDrop.Internal;
+﻿using PingDrop.Internal;
 
 namespace PingDrop.Tests.Unit;
 
@@ -23,6 +23,7 @@ public class PingDropHubTests
         Assert.Equal(1, a.PendingNotifications);
         Assert.Equal(1, b.PendingNotifications);
         Assert.Equal(1, history.Count);
+        Assert.Null(history.GetAll().Single().TargetKey);
         Assert.Equal(1, hub.TotalEventsPublished);
         Assert.Equal(2, hub.AttemptedDeliveries);
         Assert.Equal(2, hub.SuccessfulDeliveries);
@@ -53,13 +54,43 @@ public class PingDropHubTests
     }
 
     [Fact]
+    public async Task SendTo_IsRecordedInHistory_WithTargetKey()
+    {
+        var (hub, store, history) = Create();
+        store.Add(null, "u1");
+
+        await hub.SendToAsync("u1", "hi", "evt");
+
+        var e = Assert.Single(history.GetAll());
+        Assert.Equal("u1", e.TargetKey);
+        Assert.Equal("evt", e.EventType);
+    }
+
+    [Fact]
+    public async Task BroadcastAndSendTo_AreBothRecorded()
+    {
+        var (hub, store, history) = Create();
+        store.Add(null, "u1");
+
+        await hub.BroadcastAsync("a", "b");
+        await hub.SendToAsync("u1", "c", "t");
+
+        var all = history.GetAll().ToList();
+        Assert.Equal(2, all.Count);
+        Assert.Null(all[0].TargetKey);
+        Assert.Equal("u1", all[1].TargetKey);
+    }
+
+    [Fact]
     public async Task SendTo_UnknownKey_IsNoOp()
     {
-        var (hub, _, _) = Create();
+        var (hub, store, history) = Create();
+        store.Add(null, "u1");
 
         await hub.SendToAsync("nobody", "hi", "evt");
 
         Assert.Equal(0, hub.TotalEventsPublished);
+        Assert.Equal(0, history.Count);
     }
 
     [Fact]

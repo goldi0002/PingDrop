@@ -26,6 +26,7 @@ namespace PingDrop.Models
         {
             public string? Timestamp { get; set; }
             public string? EventName { get; set; }
+            public string? TargetKey { get; set; }
             public string? ConnectionId { get; set; }
             public int deliverdCount { get; set; }
             public string? Status { get; set; }

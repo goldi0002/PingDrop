@@ -66,6 +66,8 @@ namespace PingDrop.Internal
 
             PDNotification pdNotification = _notificationFactory.CreateNotification(notification, eventType, targetKey);
             Interlocked.Increment(ref _totalEventsPublished);
+            _eventHistoryStore.AddEvent(pdNotification);
+
             using Activity? activity = _activitySource.StartActivity("PingDrop.SendTo", ActivityKind.Internal);
 
             activity?.SetTag(InternalConstants.EventTypeTag, eventType);
