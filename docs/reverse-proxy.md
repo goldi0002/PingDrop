@@ -102,6 +102,12 @@ Cloudflare proxies `text/event-stream` responses through without caching them, b
 - **Traefik, HAProxy, Envoy:** disable response buffering for the path if the proxy has such a feature, and set idle/stream timeouts above the heartbeat interval (`timeout tunnel`/`timeout server` in HAProxy, stream idle timeout in Envoy).
 - **Kubernetes ingress-nginx:** use the annotations `nginx.ingress.kubernetes.io/proxy-buffering: "off"` and `nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"`.
 
+## Rolling restarts and graceful shutdown
+
+When the host starts stopping (`ApplicationStopping`, for example on SIGTERM or a deployment), PingDrop completes every open stream, the dashboard feed included. Each client's stream ends cleanly, `ClientDisconnected` runs for it, and the host does not wait out the shutdown timeout (30 s by default) for streams that would otherwise stay open. Browsers' `EventSource` then reconnects after `ClientRetryInterval`, which lets the load balancer send them to the next instance.
+
+A stream request that arrives after shutdown has begun is answered with `503 Service Unavailable` (`EventSource` retries it). Notifications still queued for a client at that moment are flushed before its stream ends only if the host's shutdown timeout allows; there is no replay, so clients can miss events during a restart (see [Limitations](limitations.md)).
+
 ## HTTP/1.1 connection limits
 
 Browsers allow only about six HTTP/1.1 connections per origin. Each tab with an open `EventSource` uses one for the lifetime of the page, so a user with many tabs can starve normal requests. Serving over HTTP/2 (which multiplexes streams over one connection) avoids this; most TLS-terminating proxies and Kestrel with HTTPS support it.

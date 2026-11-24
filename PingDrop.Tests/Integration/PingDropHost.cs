@@ -95,6 +95,9 @@ public sealed class PingDropHost : IAsyncDisposable
         }
     }
 
+    /// <summary>Stops the host (fires ApplicationStopping). Safe to call before disposal.</summary>
+    public Task StopAsync() => _app.StopAsync();
+
     public async ValueTask DisposeAsync()
     {
         Client.Dispose();
