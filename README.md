@@ -1,5 +1,8 @@
 # PingDrop
 
+[![CI](https://github.com/goldi0002/PingDrop/actions/workflows/ci.yml/badge.svg)](https://github.com/goldi0002/PingDrop/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/PingDrop.svg)](https://www.nuget.org/packages/PingDrop)
+
 Lightweight real-time notifications for ASP.NET Core, built on Server-Sent Events (SSE).
 
 PingDrop lets server code push events to browsers over a plain HTTP stream. There is no hub protocol and no client library: the browser connects with the built-in `EventSource`, and your server code calls `BroadcastAsync` or `SendToAsync`. A monitoring dashboard (connections, delivery counters, a test-send form) is included.
