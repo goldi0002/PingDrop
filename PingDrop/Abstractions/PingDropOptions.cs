@@ -85,6 +85,66 @@ namespace PingDrop.Abstractions
         /// <remarks>Every notification lost this way is counted in the dropped-deliveries metric.</remarks>
         public PingDropQueueFullMode ClientQueueFullMode { get; set; } = PingDropQueueFullMode.DropOldest;
 
+        private int? _maxConnectionsPerKey;
+        private int? _maxTotalConnections;
+        private int? _maxPayloadBytes;
+
+        /// <summary>
+        /// Gets or sets the maximum number of simultaneous connections that may share one subscriber key. <see langword="null"/>
+        /// (the default) means unlimited.
+        /// </summary>
+        /// <remarks>A connection over the limit is refused before it is registered: the endpoint answers HTTP 429 with a
+        /// <c>Retry-After</c> header, no SSE headers are sent and <see cref="ClientConnected"/> is not called. Connections
+        /// without a key are not affected by this limit (they count toward <see cref="MaxTotalConnections"/>). The
+        /// dashboard's own feed is never counted. Browsers' <c>EventSource</c> does not retry after a non-200 response.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxConnectionsPerKey
+        {
+            get => _maxConnectionsPerKey;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxConnectionsPerKey = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the maximum number of simultaneous user-facing connections (keyed and keyless). <see langword="null"/>
+        /// (the default) means unlimited.
+        /// </summary>
+        /// <remarks>A connection over the limit is refused before it is registered: the endpoint answers HTTP 503 with a
+        /// <c>Retry-After</c> header, no SSE headers are sent and <see cref="ClientConnected"/> is not called. The dashboard's own
+        /// feed is not counted; see <see cref="PingDropDashboardOptions.MaxFeedConnections"/>.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxTotalConnections
+        {
+            get => _maxTotalConnections;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxTotalConnections = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the maximum size, in UTF-8 bytes, of a notification's serialized JSON payload (the SSE <c>data</c>
+        /// field). <see langword="null"/> (the default) means unlimited.
+        /// </summary>
+        /// <remarks><see cref="IPingDropService.BroadcastAsync{T}"/> and <see cref="IPingDropService.SendToAsync{T}(string, T, string, System.Threading.CancellationToken)"/>
+        /// throw <see cref="PingDropPayloadTooLargeException"/> (an <see cref="ArgumentException"/>) for a larger payload,
+        /// even when nobody is connected. Nothing is delivered, no event id is consumed and no history entry is recorded.
+        /// A payload exactly at the limit is accepted. The dashboard's send endpoint answers 413.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxPayloadBytes
+        {
+            get => _maxPayloadBytes;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxPayloadBytes = value;
+            }
+        }
+
         /// <summary>
         /// Gets or sets a value indicating whether the dashboard is enabled.
         /// </summary>
@@ -174,6 +234,46 @@ namespace PingDrop.Abstractions
         /// lines are the noisiest, so they are off by default. Nothing is built or serialized when the dashboard is
         /// disabled or no dashboard feed is connected.</remarks>
         public bool LogEachDispatch { get; set; }
+
+        private int? _maxSendsPerMinute;
+        private int? _maxFeedConnections = 10;
+
+        /// <summary>
+        /// Gets or sets the maximum number of notifications that may be sent through the dashboard's
+        /// <c>POST send-notification</c> endpoint per minute. <see langword="null"/> (the default) means unlimited.
+        /// </summary>
+        /// <remarks>A fixed one-minute window, counted from the first request in each window, shared by all callers of this
+        /// process. Every request counts, including ones later rejected as invalid. Requests over the limit are answered with
+        /// HTTP 429, a <c>Retry-After</c> header and the standard failure body. Sends from application code through
+        /// <see cref="IPingDropService"/> are not limited. The clock is the <see cref="TimeProvider"/> registered in DI, or
+        /// <see cref="TimeProvider.System"/>.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxSendsPerMinute
+        {
+            get => _maxSendsPerMinute;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxSendsPerMinute = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the maximum number of simultaneous dashboard live-feed connections (open dashboard pages).
+        /// Defaults to 10; <see langword="null"/> means unlimited.
+        /// </summary>
+        /// <remarks>These connections are separate from <see cref="PingDropOptions.MaxTotalConnections"/>. A feed over the cap is
+        /// answered with HTTP 503 and a <c>Retry-After</c> header.</remarks>
+        /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+        public int? MaxFeedConnections
+        {
+            get => _maxFeedConnections;
+            set
+            {
+                if (value is int v) ArgumentOutOfRangeException.ThrowIfLessThan(v, 1);
+                _maxFeedConnections = value;
+            }
+        }
 
         internal string EndpointPath { get; set; } = InternalConstants.DefaultEndpointPath;
         /// <summary>

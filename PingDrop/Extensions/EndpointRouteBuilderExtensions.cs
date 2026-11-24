@@ -111,6 +111,18 @@ namespace PingDrop.Extensions
             response.Headers.Append("X-Content-Type-Options", "nosniff");
         }
 
+        private const int DefaultRetryAfterSeconds = 5;
+
+        private static void RejectConnection(HttpResponse response, PDConnectionRejection rejection, PingDropOptions options)
+        {
+            // Per key: 429 (this caller has too many). Total / dashboard feeds: 503 (the server is full).
+            response.StatusCode = rejection == PDConnectionRejection.PerKey ? StatusCodes.Status429TooManyRequests : StatusCodes.Status503ServiceUnavailable;
+
+            double retry = options.ClientRetryInterval.TotalSeconds;
+            int seconds = retry > 0 ? (int)Math.Ceiling(retry) : DefaultRetryAfterSeconds;
+            response.Headers.RetryAfter = Math.Max(1, seconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         private static async Task HandleSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options, IEventPublisher eventPublisher, ILoggerFactory loggerFactory, IHostApplicationLifetime lifetime)
         {
             // Once the host is stopping, new streams are refused so they cannot hang past shutdown (clients retry the next instance).
@@ -121,13 +133,24 @@ namespace PingDrop.Extensions
             }
 
             ILogger logger = loggerFactory.CreateLogger(PDLog.Category);
-            AddSseHeaders(context.Response);
 
             HashSet<string>? events = ParseEvents(context.Request.Query[InternalConstants.DefaultQueryEventTypeParam]);
             string? subscriberKey = options.TargetKeyResolver?.Invoke(context);
             long? lastEventId = options.EnableReplay ? PDReplay.ParseLastEventId(context.Request) : null;
-            // The client is registered (live events start queueing) before the history is snapshotted below.
-            await using PDClientConnection client = hub.AddClient(events, subscriberKey);
+
+            // The client is registered (live events start queueing) before the history is snapshotted below. The limit check and
+            // the registration are one atomic step; a refused connection gets a bare status and Retry-After, never SSE headers.
+            PDConnectionLimits limits = new(options.MaxConnectionsPerKey, options.MaxTotalConnections, null);
+            PDConnectionRejection rejection = hub.TryAddClient(events, subscriberKey, limits, out PDClientConnection? added);
+            if (rejection != PDConnectionRejection.None)
+            {
+                RejectConnection(context.Response, rejection, options);
+                hub.WarnConnectionRejected(rejection, limits);
+                return;
+            }
+
+            AddSseHeaders(context.Response);
+            await using PDClientConnection client = added!;
             PDLog.ClientConnected(logger, client.ConnectionId, subscriberKey);
             // Shutdown may have swept the store just before this client was added; complete it so the loop below ends.
             if (lifetime.ApplicationStopping.IsCancellationRequested) await client.DisposeAsync();
@@ -268,9 +291,18 @@ namespace PingDrop.Extensions
                 return;
             }
 
-            AddSseHeaders(context.Response);
             HashSet<string>? events = ParseEvents(context.Request.Query[InternalConstants.DefaultQueryEventTypeParam]);
-            await using PDClientConnection dashboardClient = hub.AddClient(events, InternalConstants.DashboardSubscriberKey);
+            PDConnectionLimits limits = new(null, null, options.Dashboard.MaxFeedConnections);
+            PDConnectionRejection rejection = hub.TryAddClient(events, InternalConstants.DashboardSubscriberKey, limits, out PDClientConnection? added);
+            if (rejection != PDConnectionRejection.None)
+            {
+                RejectConnection(context.Response, rejection, options);
+                hub.WarnConnectionRejected(rejection, limits);
+                return;
+            }
+
+            AddSseHeaders(context.Response);
+            await using PDClientConnection dashboardClient = added!;
             if (lifetime.ApplicationStopping.IsCancellationRequested) await dashboardClient.DisposeAsync();
             try
             {
@@ -447,8 +479,20 @@ namespace PingDrop.Extensions
                 }
             });
 
+            PDSendRateLimiter? sendLimiter = options.Dashboard.MaxSendsPerMinute is int maxSends
+                ? new PDSendRateLimiter(maxSends, endpoints.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System)
+                : null;
+
             endpoints.MapPost(options.Dashboard.Path + "/send-notification", async context =>
             {
+                if (sendLimiter is not null && !sendLimiter.TryAcquire(out int retryAfterSeconds))
+                {
+                    context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    context.Response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure($"Too many notifications sent from the dashboard (limit {options.Dashboard.MaxSendsPerMinute} per minute). Retry in {retryAfterSeconds} second(s)."), _jsonOptions, context.RequestAborted);
+                    return;
+                }
+
                 NotificationRequest? request = await context.Request.ReadFromJsonAsync<NotificationRequest>(context.RequestAborted);
 
                 if (request is null)
@@ -490,41 +534,51 @@ namespace PingDrop.Extensions
                 }
 
                 bool notificationSent = false;
-                if (string.IsNullOrEmpty(request.TargetType))
+                try
                 {
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure("TargetType is required"), _jsonOptions, context.RequestAborted);
-                    return;
-                }
-                if (request.TargetType.Equals("key", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (string.IsNullOrWhiteSpace(request.TargetId))
+                    if (string.IsNullOrEmpty(request.TargetType))
                     {
                         context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                        await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure("TargetId is required for key notifications"), _jsonOptions, context.RequestAborted);
+                        await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure("TargetType is required"), _jsonOptions, context.RequestAborted);
                         return;
                     }
-
-                    await hub.SendToAsync(request.TargetId, request.Payload, request.EventName!, context.RequestAborted);
-
-                    notificationSent = true;
-                }
-                else if (request.TargetType.Equals("connection", StringComparison.OrdinalIgnoreCase))
-                {
-                    var connection = _connectionStore.GetAll().FirstOrDefault(c => c.ConnectionId.ToString() == request.TargetId);
-
-                    if (connection is not null && !string.IsNullOrWhiteSpace(connection.SubscriberKey))
+                    if (request.TargetType.Equals("key", StringComparison.OrdinalIgnoreCase))
                     {
-                        await hub.SendToAsync(connection.SubscriberKey, request.Payload, request.EventName!, context.RequestAborted);
+                        if (string.IsNullOrWhiteSpace(request.TargetId))
+                        {
+                            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                            await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure("TargetId is required for key notifications"), _jsonOptions, context.RequestAborted);
+                            return;
+                        }
+
+                        await hub.SendToAsync(request.TargetId, request.Payload, request.EventName!, context.RequestAborted);
 
                         notificationSent = true;
                     }
-                }
-                else if (request.TargetType.Equals("broadcast", StringComparison.OrdinalIgnoreCase))
-                {
-                    await hub.BroadcastAsync(request.Payload, request.EventName!, context.RequestAborted);
+                    else if (request.TargetType.Equals("connection", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var connection = _connectionStore.GetAll().FirstOrDefault(c => c.ConnectionId.ToString() == request.TargetId);
 
-                    notificationSent = true;
+                        if (connection is not null && !string.IsNullOrWhiteSpace(connection.SubscriberKey))
+                        {
+                            await hub.SendToAsync(connection.SubscriberKey, request.Payload, request.EventName!, context.RequestAborted);
+
+                            notificationSent = true;
+                        }
+                    }
+                    else if (request.TargetType.Equals("broadcast", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await hub.BroadcastAsync(request.Payload, request.EventName!, context.RequestAborted);
+
+                        notificationSent = true;
+                    }
+
+                }
+                catch (PingDropPayloadTooLargeException ex)
+                {
+                    context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                    await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure(ex.Message), _jsonOptions, context.RequestAborted);
+                    return;
                 }
 
                 if (!notificationSent)

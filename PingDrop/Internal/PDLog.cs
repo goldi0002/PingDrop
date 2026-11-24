@@ -36,5 +36,8 @@ namespace PingDrop.Internal
 
         [LoggerMessage(EventId = 10, Level = LogLevel.Debug, Message = "Not replaying to client {ConnectionId}: Last-Event-ID {LastEventId} is newer than the newest event id issued ({NewestId}); ids restart with the process.")]
         public static partial void ReplaySkippedUnknownId(ILogger logger, long connectionId, long lastEventId, long newestId);
+
+        [LoggerMessage(EventId = 11, Level = LogLevel.Warning, Message = "Refused a connection because {Limit} ({Value}) is reached ({Suppressed} further refusals suppressed since the last warning).")]
+        public static partial void ConnectionRejected(ILogger logger, string limit, int value, long suppressed);
     }
 }

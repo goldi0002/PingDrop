@@ -11,6 +11,9 @@ namespace PingDrop.Abstractions
     {
         PDNotification CreateNotification<T>(T notification, string eventType, string? targetKey = null, IReadOnlyList<string>? targetKeys = null);
 
+        /// <summary>Like <see cref="CreateNotification{T}"/> for a payload that is already serialized JSON.</summary>
+        PDNotification CreateNotificationFromJson(string payloadJson, string eventType, string? targetKey = null, IReadOnlyList<string>? targetKeys = null);
+
         /// <summary>The newest event id issued by this factory (0 when none).</summary>
         long LastIssuedId { get; }
     }

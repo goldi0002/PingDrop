@@ -24,6 +24,9 @@ The delegate runs once, when `AddPingDrop` is called. Options are read from the 
 | `EnableReplay` | `bool` | `true` | Replay retained events a reconnecting client missed, using `Last-Event-ID` (header) or `lastEventId` (query). See [`EnableReplay`](#enablereplay). |
 | `ClientQueueCapacity` | `int` | `20` | Maximum notifications queued per connected client. Must be at least 1; smaller values throw `ArgumentOutOfRangeException`. |
 | `ClientQueueFullMode` | `PingDropQueueFullMode` | `DropOldest` | What happens when a client's queue is full: `DropOldest`, `DropNewest` or `DisconnectClient`. |
+| `MaxConnectionsPerKey` | `int?` | `null` (unlimited) | Maximum simultaneous connections per subscriber key. Over the limit: HTTP 429 with `Retry-After`. See [Limits](#limits). Must be at least 1. |
+| `MaxTotalConnections` | `int?` | `null` (unlimited) | Maximum simultaneous user-facing connections (keyed and keyless). Over the limit: HTTP 503 with `Retry-After`. Must be at least 1. |
+| `MaxPayloadBytes` | `int?` | `null` (unlimited) | Maximum size of a notification's serialized JSON payload, in UTF-8 bytes. Larger payloads throw `PingDropPayloadTooLargeException`. Must be at least 1. |
 | `EnableDashboard` | `bool` | `true` | Whether to map the dashboard. See [Dashboard](dashboard.md) for the Development-only default. |
 | `Dashboard` | `PingDropDashboardOptions` | new instance | Dashboard options, below. |
 | `ClientConnected` | `Func<long, Task>?` | `null` | Called after a client connects, with its connection id. Exceptions thrown by the callback are swallowed. |
@@ -67,6 +70,25 @@ Every connection has its own bounded queue between `BroadcastAsync`/`SendToAsync
 
 Every event lost this way (including the one that triggers a disconnect) counts toward the "Dropped Deliveries" metric and the aggregated drop warning in the log. The queue holds events not yet written to the client; an event already being written when the stream ends is not counted as dropped.
 
+### Limits
+
+All limits are off (`null`) by default, except the dashboard feed cap. Setting a value below 1 throws `ArgumentOutOfRangeException`.
+
+**`MaxConnectionsPerKey` / `MaxTotalConnections`**: counted over user-facing connections only; the dashboard's own live feed is never counted. A connection without a subscriber key counts toward the total but is never limited per key. The limit check and the registration are one atomic step, so concurrent connects cannot exceed a limit.
+
+A refused connection is answered **before** it is registered: no SSE headers are sent, `ClientConnected` is not called and nothing is added to the dashboard.
+
+| Limit hit | Status | Headers |
+|---|---|---|
+| `MaxConnectionsPerKey` | `429 Too Many Requests` | `Retry-After` |
+| `MaxTotalConnections` | `503 Service Unavailable` | `Retry-After` |
+
+`Retry-After` is `ClientRetryInterval` rounded up to whole seconds (5 when the hint is disabled). Note that browsers' `EventSource` does not reconnect after a non-200 response, so a page using a bare `EventSource` must decide for itself when to try again. The bundled JavaScript client emits `error` and retries with its own backoff. Rejections are logged at Warning, at most once per 10 seconds, with a count of the further rejections suppressed since the previous warning. A request that arrives while the host is stopping still gets 503 (shutdown is checked first). Replay is unaffected: a connection that is accepted replays as usual.
+
+**`MaxPayloadBytes`**: the payload is serialized once and its UTF-8 byte length is measured on the JSON text that goes into the SSE `data` field (the `System.Text.Json` default encoder escapes non-ASCII characters as `\uXXXX`, which counts as 6 bytes). A payload exactly at the limit is accepted. `BroadcastAsync` and both `SendToAsync` overloads **throw** `PingDropPayloadTooLargeException` (derives from `ArgumentException`; `Size` and `Limit` give the numbers) rather than dropping silently, so the calling code can react. The check happens before an event id is assigned and before the event is recorded in the history, so a rejected payload leaves no trace, and it applies even when nobody is connected. With no limit configured nothing extra is serialized or measured. The dashboard's send endpoint answers `413`.
+
+**`Dashboard.MaxSendsPerMinute`** and **`Dashboard.MaxFeedConnections`**: see below and [Dashboard](dashboard.md#limits).
+
 ### `TargetKeyResolver`
 
 Runs once per SSE connection. Multiple connections can resolve to the same key. Keys are compared case-sensitively. Returning `null` or an empty string leaves the connection keyless: it still receives broadcasts.
@@ -83,6 +105,8 @@ The id is a process-local `long` (it is the same id the dashboard shows). It is 
 | `AuthorizationPolicy` | `string?` | `null` | Policy required for every dashboard route (page, assets, API, live feed), including sending notifications. |
 | `AllowAnonymous` | `bool` | `false` | Allows mapping the dashboard with no policy outside Development. Trusted networks only. |
 | `LogEachDispatch` | `bool` | `false` | Also publish a live-log line for every event dispatched to a client. Connect and disconnect lines are always shown while a dashboard is open. Live logs and metric pushes are skipped entirely when the dashboard is disabled or no dashboard feed is connected. |
+| `MaxSendsPerMinute` | `int?` | `null` (unlimited) | Maximum `POST <dashboard>/send-notification` requests per minute (fixed one-minute window, whole process). Over the limit: HTTP 429 with `Retry-After`. Must be at least 1. |
+| `MaxFeedConnections` | `int?` | `10` | Maximum simultaneous dashboard live-feed connections (open dashboard pages), counted separately from `MaxTotalConnections`. Over the cap: HTTP 503 with `Retry-After`. `null` is unlimited. Must be at least 1. |
 | `Path` | `string` (read-only) | `<EndpointPath>/dashboard` | The dashboard's base path. Derived from `EndpointPath`; you cannot set it separately. |
 
 When `Dashboard.AuthorizationPolicy` is `null` and `AllowAnonymous` is `false`, the dashboard is mapped only if the host environment is Development. In any other environment it is skipped and a warning is logged at startup. See [Authentication](authentication.md#securing-the-dashboard).

@@ -76,6 +76,8 @@ Responses use the envelope `{ "isSuccess": bool, "message": string?, "data": ...
 | 400 | Missing/invalid body, unknown `targetType`, missing `eventName` or `payload`, or `key` without `targetId` |
 | 403 | `targetId` is the dashboard's reserved key |
 | 404 | `connection` id not found, or the connection has no key |
+| 413 | The serialized payload is larger than `MaxPayloadBytes`; nothing was sent |
+| 429 | More than `Dashboard.MaxSendsPerMinute` requests in the current minute; see `Retry-After` |
 
 A 200 means the request was accepted and queued for matching connections. A `key` send to a key with no connections also returns 200, because the underlying `SendToAsync` does nothing for unknown keys.
 
@@ -86,6 +88,12 @@ curl -X POST http://localhost:5000/pingdrop/stream/dashboard/send-notification \
   -H "Content-Type: application/json" \
   -d '{"targetType":"broadcast","eventName":"notification","payload":{"Text":"Hi"}}'
 ```
+
+## Limits
+
+- `Dashboard.MaxSendsPerMinute` (default `null`, unlimited) caps `POST <dashboard>/send-notification`. It is a small in-memory fixed-window limiter inside the library (no ASP.NET Core rate-limiting setup needed): the window starts with the first request and lasts one minute, the count is shared by every caller of this process, and every request counts, including ones that are later rejected as invalid. A request over the limit gets `429`, a `Retry-After` header (seconds until the window resets) and the usual failure envelope. A fixed window allows up to twice the limit across a window boundary. Sends from your own code through `IPingDropService` are not affected. The limiter's clock is the `TimeProvider` registered in DI (`TimeProvider.System` otherwise).
+- `Dashboard.MaxFeedConnections` (default `10`) caps open dashboard pages (live feeds). A feed over the cap gets `503` with `Retry-After`; the page still loads but its live updates do not connect. Feeds are not counted in `MaxConnectionsPerKey`/`MaxTotalConnections`.
+- `MaxPayloadBytes` applies to dashboard sends too and returns `413`.
 
 ## Reading the metrics
 

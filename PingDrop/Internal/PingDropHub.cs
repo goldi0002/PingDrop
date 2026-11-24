@@ -3,6 +3,8 @@ using PingDrop.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
 
 namespace PingDrop.Internal
 {
@@ -16,6 +18,9 @@ namespace PingDrop.Internal
         private readonly ILogger _logger = loggerFactory?.CreateLogger(PDLog.Category) ?? NullLogger.Instance;
         private readonly object _publishLock = new();
         private readonly bool _replayEnabled = options?.EnableReplay ?? false;
+        private readonly int? _maxPayloadBytes = options?.MaxPayloadBytes;
+        private long _lastRejectionWarningTicks;
+        private long _suppressedRejectionWarnings;
         private long _lastDropWarningTicks;
         private long _suppressedDropWarnings;
 
@@ -94,6 +99,19 @@ namespace PingDrop.Internal
         private void Publish<T>(T notification, string eventType, string? targetKey, IReadOnlyList<string>? targetKeys,
             Func<List<PDClientConnection>> resolveClients, string activityName, string? subscriberKeyTag)
         {
+            // With a payload limit, serialize (once) and measure before taking the lock, so an oversize payload throws before any id
+            // is consumed or anything is recorded, whether or not anyone is connected. Without a limit nothing extra is done here.
+            string? payloadJson = null;
+            if (_maxPayloadBytes is int maxPayloadBytes)
+            {
+                payloadJson = JsonSerializer.Serialize(notification);
+                int size = Encoding.UTF8.GetByteCount(payloadJson);
+                if (size > maxPayloadBytes)
+                {
+                    throw new PingDropPayloadTooLargeException(size, maxPayloadBytes);
+                }
+            }
+
             lock (_publishLock)
             {
                 // Peek at the recipients first so that, with replay off, an event nobody receives does not consume an id.
@@ -102,7 +120,9 @@ namespace PingDrop.Internal
                     return;
                 }
 
-                PDNotification pdNotification = _notificationFactory.CreateNotification(notification, eventType, targetKey, targetKeys);
+                PDNotification pdNotification = payloadJson is null
+                    ? _notificationFactory.CreateNotification(notification, eventType, targetKey, targetKeys)
+                    : _notificationFactory.CreateNotificationFromJson(payloadJson, eventType, targetKey, targetKeys);
 
                 // Record before resolving recipients: a client that registered before this point and snapshots the history
                 // later may or may not see this event in the snapshot, but it is then guaranteed to be among the recipients
@@ -235,6 +255,38 @@ namespace PingDrop.Internal
         {
             return _connectionStore.Add(eventTypes, subscriberKey);
         }
+        /// <summary>Registers a client unless a connection limit is reached (atomically); see <see cref="IPDConnectionStore.TryAdd"/>.</summary>
+        public PDConnectionRejection TryAddClient(HashSet<string>? eventTypes, string? subscriberKey, PDConnectionLimits limits, out PDClientConnection? client)
+        {
+            return _connectionStore.TryAdd(eventTypes, subscriberKey, limits, out client);
+        }
+
+        /// <summary>Logs a refused connection as a Warning, at most once per 10 seconds; the rest are counted and reported with the next one.</summary>
+        public void WarnConnectionRejected(PDConnectionRejection rejection, PDConnectionLimits limits)
+        {
+            if (!_logger.IsEnabled(LogLevel.Warning))
+            {
+                return;
+            }
+
+            long now = Environment.TickCount64;
+            long last = Interlocked.Read(ref _lastRejectionWarningTicks);
+
+            if ((last != 0 && now - last < 10_000) || Interlocked.CompareExchange(ref _lastRejectionWarningTicks, now, last) != last)
+            {
+                Interlocked.Increment(ref _suppressedRejectionWarnings);
+                return;
+            }
+
+            (string reason, int? limit) = rejection switch
+            {
+                PDConnectionRejection.PerKey => ("MaxConnectionsPerKey", limits.MaxPerKey),
+                PDConnectionRejection.Total => ("MaxTotalConnections", limits.MaxTotal),
+                _ => ("Dashboard.MaxFeedConnections", limits.MaxDashboardFeeds)
+            };
+            PDLog.ConnectionRejected(_logger, reason, limit ?? 0, Interlocked.Exchange(ref _suppressedRejectionWarnings, 0));
+        }
+
         public void RemoveClient(long id)
         {
             _connectionStore.Remove(id);
