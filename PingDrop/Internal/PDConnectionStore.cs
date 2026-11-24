@@ -49,6 +49,8 @@ namespace PingDrop.Internal
             return _all.Values.Where(c => !c.IsDashboard);
         }
 
+        public IEnumerable<PDClientConnection> GetAllIncludingDashboard() => _all.Values;
+
         public IEnumerable<PDClientConnection> GetByKey(string subscriberKey)
         {
             return !string.IsNullOrWhiteSpace(subscriberKey) && _byKey.TryGetValue(subscriberKey, out var bucket)

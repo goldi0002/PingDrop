@@ -40,6 +40,8 @@ namespace PingDrop.Extensions
             services.AddSingleton<IPingDropService>(sp => sp.GetRequiredService<PingDropHub>());
             services.AddSingleton<PingDropMetrics>();
             services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<PingDropMetrics>());
+            services.AddSingleton<PDShutdownService>();
+            services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<PDShutdownService>());
             services.AddSingleton<IEventPublisher, PDEventPublisher>();
             services.AddSingleton<IDashboardService, DashboardService>();
 

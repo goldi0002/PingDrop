@@ -111,8 +111,15 @@ namespace PingDrop.Extensions
             response.Headers.Append("X-Content-Type-Options", "nosniff");
         }
 
-        private static async Task HandleSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options, IEventPublisher eventPublisher, ILoggerFactory loggerFactory)
+        private static async Task HandleSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options, IEventPublisher eventPublisher, ILoggerFactory loggerFactory, IHostApplicationLifetime lifetime)
         {
+            // Once the host is stopping, new streams are refused so they cannot hang past shutdown (clients retry the next instance).
+            if (lifetime.ApplicationStopping.IsCancellationRequested)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+
             ILogger logger = loggerFactory.CreateLogger(PDLog.Category);
             AddSseHeaders(context.Response);
 
@@ -120,6 +127,8 @@ namespace PingDrop.Extensions
             string? subscriberKey = options.TargetKeyResolver?.Invoke(context);
             await using PDClientConnection client = hub.AddClient(events, subscriberKey);
             PDLog.ClientConnected(logger, client.ConnectionId, subscriberKey);
+            // Shutdown may have swept the store just before this client was added; complete it so the loop below ends.
+            if (lifetime.ApplicationStopping.IsCancellationRequested) await client.DisposeAsync();
 
             if (options.ClientConnected is not null)
             {
@@ -193,11 +202,18 @@ namespace PingDrop.Extensions
                 }
             }
         }
-        private static async Task HandleDashboardSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options)
+        private static async Task HandleDashboardSseConnection(HttpContext context, PingDropHub hub, PingDropOptions options, IHostApplicationLifetime lifetime)
         {
+            if (lifetime.ApplicationStopping.IsCancellationRequested)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+
             AddSseHeaders(context.Response);
             HashSet<string>? events = ParseEvents(context.Request.Query[InternalConstants.DefaultQueryEventTypeParam]);
             await using PDClientConnection dashboardClient = hub.AddClient(events, InternalConstants.DashboardSubscriberKey);
+            if (lifetime.ApplicationStopping.IsCancellationRequested) await dashboardClient.DisposeAsync();
             try
             {
                 // Register first, then flush: once the client sees headers it is guaranteed to receive broadcasts.
