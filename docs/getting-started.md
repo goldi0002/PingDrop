@@ -26,11 +26,12 @@ app.Run();
 
 ## Send notifications
 
-Inject `IPingDropService`. It has two methods:
+Inject `IPingDropService`. It has three methods:
 
 ```csharp
 ValueTask BroadcastAsync<T>(T notification, string eventType = "message", CancellationToken ct = default);
 ValueTask SendToAsync<T>(string targetKey, T notification, string eventType = "message", CancellationToken ct = default);
+ValueTask SendToAsync<T>(IEnumerable<string> targetKeys, T notification, string eventType = "message", CancellationToken ct = default);
 ```
 
 ```csharp
@@ -42,9 +43,22 @@ app.MapPost("/notify", async (IPingDropService pingDrop) =>
     // Clients whose subscriber key is "user-42"
     await pingDrop.SendToAsync("user-42", new { Text = "Hi" }, "notification");
 
+    // Several users at once, as ONE event
+    await pingDrop.SendToAsync(new[] { "user-1", "user-2", "user-3" }, new { Text = "Team meeting at 10" }, "notification");
+
     return Results.Accepted();
 });
 ```
+
+### Sending to several keys
+
+Prefer the `IEnumerable<string>` overload over a loop of single-key sends. The notification is serialized once, gets **one event id**, counts once in the published-events metric and is recorded once in the history. Details:
+
+- Keys are de-duplicated; null and blank entries are ignored. If none of the keys is non-blank, the call throws `ArgumentException`.
+- Keys nobody is connected with are skipped silently. If no connection matches any key, nothing is published or recorded.
+- Connections whose event-type filter excludes `eventType` are skipped, as for the other methods.
+- Replay (`Last-Event-ID`) respects the key list: a client that reconnects only gets the multi-key events addressed to its own key.
+- In the history and the dashboard's Recent Events page the target shows as the keys joined with a comma. That is for display only.
 
 Notes on behaviour:
 

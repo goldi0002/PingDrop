@@ -49,7 +49,7 @@ es.addEventListener("notification", e => console.log(JSON.parse(e.data)));
 
 **4. Open the dashboard** (Development only by default): `http://localhost:5000/pingdrop/stream/dashboard`.
 
-To send to one user instead of everyone, identify subscribers with `TargetKeyResolver` and call `SendToAsync`. See [Getting started](docs/getting-started.md) and [Authentication](docs/authentication.md).
+To send to one user (or a list of users) instead of everyone, identify subscribers with `TargetKeyResolver` and call `SendToAsync`. See [Getting started](docs/getting-started.md) and [Authentication](docs/authentication.md).
 
 ## Documentation
 
