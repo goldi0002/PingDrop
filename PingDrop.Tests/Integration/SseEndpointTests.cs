@@ -8,8 +8,6 @@ public class SseEndpointTests
         await using var host = await PingDropHost.StartAsync();
         await using var sse = await host.ConnectAsync();
 
-        // Headers are only sent with the first event (see heartbeat issue), so send one.
-        await host.Service.BroadcastAsync("x", "evt");
         var response = await sse.GetResponseAsync();
 
         Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
@@ -91,10 +89,82 @@ public class SseEndpointTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var pending = host.Client.GetAsync("/custom/stream", HttpCompletionOption.ResponseHeadersRead, cts.Token);
-        await PingDropHost.WaitUntilAsync(() => { lock (host.Connected) return host.Connected.Count == 1; });
-        await host.Service.BroadcastAsync("x", "evt");
         using var response = await pending;
 
         Assert.True(response.IsSuccessStatusCode);
+    }
+
+    [Fact]
+    public async Task Connect_FlushesRetryHintAndConnectedComment_BeforeAnyEvent()
+    {
+        await using var host = await PingDropHost.StartAsync(o => o.ClientRetryInterval = TimeSpan.FromSeconds(5));
+        await using var sse = await host.ConnectAsync();
+
+        var response = await sse.GetResponseAsync();
+        Assert.True(response.IsSuccessStatusCode);
+        Assert.Equal("retry: 5000", await sse.ReadLineAsync());
+        Assert.Equal(": connected", await sse.ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task Connect_OmitsRetryHint_WhenDisabled()
+    {
+        await using var host = await PingDropHost.StartAsync(o => o.ClientRetryInterval = TimeSpan.Zero);
+        await using var sse = await host.ConnectAsync();
+
+        Assert.Equal(": connected", await sse.ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task Stream_KeepsCacheAndProxyHeaders()
+    {
+        await using var host = await PingDropHost.StartAsync();
+        await using var sse = await host.ConnectAsync();
+
+        var response = await sse.GetResponseAsync();
+        Assert.Equal("no", response.Headers.GetValues("X-Accel-Buffering").Single());
+        Assert.Contains("no-transform", response.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
+    public async Task Heartbeat_IsSentWhileIdle_AndDoesNotBreakEventParsing()
+    {
+        await using var host = await PingDropHost.StartAsync(o => o.HeartbeatInterval = TimeSpan.FromMilliseconds(100));
+        await using var sse = await host.ConnectAsync();
+
+        await sse.ReadUntilLineAsync(": connected");
+        await sse.ReadUntilLineAsync(": ping");
+        await sse.ReadUntilLineAsync(": ping");
+
+        await host.Service.BroadcastAsync("x", "evt");
+        var (_, evt, _) = await sse.ReadEventAsync();
+        Assert.Equal("evt", evt);
+    }
+
+    [Fact]
+    public async Task Heartbeat_IsNotCountedAsDelivery()
+    {
+        await using var host = await PingDropHost.StartAsync(o => o.HeartbeatInterval = TimeSpan.FromMilliseconds(50));
+        await using var sse = await host.ConnectAsync();
+
+        await sse.ReadUntilLineAsync(": ping");
+        await sse.ReadUntilLineAsync(": ping");
+
+        Assert.Equal(0, ((PingDrop.Internal.PingDropHub)host.Service).GetMetrics().SuccessfulDeliveries);
+    }
+
+    [Fact]
+    public async Task Heartbeat_CanBeDisabled()
+    {
+        await using var host = await PingDropHost.StartAsync(o => o.HeartbeatInterval = TimeSpan.Zero);
+        await using var sse = await host.ConnectAsync();
+        await sse.ReadUntilLineAsync(": connected");
+        Assert.Equal("", await sse.ReadLineAsync());
+
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+            await sse.ReadLineAsync().WaitAsync(cts.Token);
+        });
     }
 }

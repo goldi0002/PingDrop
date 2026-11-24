@@ -74,10 +74,10 @@ public sealed class PingDropHost : IAsyncDisposable
         int before;
         lock (Connected) before = Connected.Count;
 
-        // The server does not flush headers until the first event is written, so the
-        // response task only completes once something has been sent. Don't await it here.
+        // The server flushes headers as soon as the client is registered, so this returns promptly.
         var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         var responseTask = Client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        await responseTask.WaitAsync(TimeSpan.FromSeconds(5));
         await WaitUntilAsync(() => { lock (Connected) return Connected.Count > before; });
         return new SseStream(responseTask, cts);
     }
@@ -112,7 +112,7 @@ public sealed class SseStream : IAsyncDisposable
         _cts = cts;
     }
 
-    /// <summary>Completes once the server has sent headers (i.e. after the first event).</summary>
+    /// <summary>Completes once the server has sent headers (immediately after connect).</summary>
     public Task<HttpResponseMessage> GetResponseAsync() => _responseTask;
 
     /// <summary>Reads the next complete SSE frame (id/event/data).</summary>
@@ -137,6 +137,31 @@ public sealed class SseStream : IAsyncDisposable
             if (line.StartsWith("id: ")) id = line[4..];
             else if (line.StartsWith("event: ")) evt = line[7..];
             else if (line.StartsWith("data: ")) data = line[6..];
+        }
+    }
+
+    /// <summary>Reads the next raw line (including comment lines such as ": ping"), without SSE parsing.</summary>
+    public async Task<string> ReadLineAsync()
+    {
+        if (_reader is null)
+        {
+            var response = await _responseTask;
+            _reader = new StreamReader(await response.Content.ReadAsStreamAsync(_cts.Token), Encoding.UTF8);
+        }
+
+        var line = await _reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5), _cts.Token);
+        return line ?? throw new EndOfStreamException();
+    }
+
+    /// <summary>Reads raw lines until one equals <paramref name="expected"/>; returns all lines read.</summary>
+    public async Task<List<string>> ReadUntilLineAsync(string expected)
+    {
+        var lines = new List<string>();
+        while (true)
+        {
+            var line = await ReadLineAsync();
+            lines.Add(line);
+            if (line == expected) return lines;
         }
     }
 

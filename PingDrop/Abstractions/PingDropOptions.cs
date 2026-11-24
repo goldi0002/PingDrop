@@ -27,6 +27,22 @@ namespace PingDrop.Abstractions
         public string? AuthorizationPolicy { get; set; }
 
         /// <summary>
+        /// Gets or sets how often a <c>: ping</c> comment is written to idle SSE connections so that proxies and load
+        /// balancers do not close them and dead peers are detected. Defaults to 15 seconds.
+        /// </summary>
+        /// <remarks>Set to <see cref="TimeSpan.Zero"/> or a negative value to disable heartbeats. Heartbeats are SSE
+        /// comments, so clients ignore them, and they are not counted as delivered notifications.</remarks>
+        public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(15);
+
+        /// <summary>
+        /// Gets or sets the reconnection delay suggested to clients through the SSE <c>retry:</c> field, sent once when
+        /// a stream opens. Defaults to 3 seconds.
+        /// </summary>
+        /// <remarks>Set to <see cref="TimeSpan.Zero"/> or a negative value to omit the hint, in which case the client
+        /// uses its own default.</remarks>
+        public TimeSpan ClientRetryInterval { get; set; } = TimeSpan.FromSeconds(3);
+
+        /// <summary>
         /// Gets or sets the maximum number of events to retain in the event history.
         /// </summary>
         public int EventHistorySize { get; set; } = 50;

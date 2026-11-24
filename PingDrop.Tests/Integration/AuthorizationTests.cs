@@ -118,8 +118,6 @@ public class AuthorizationTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
 
         var pending = host.Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-        await PingDropHost.WaitUntilAsync(() => { lock (host.Connected) return host.Connected.Count == 1; });
-        await host.Service.BroadcastAsync("x", "evt");
         using var res = await pending;
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);

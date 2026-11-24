@@ -90,6 +90,12 @@ namespace PingDrop.Internal
             return written;
         }
 
+        /// <summary>Records connection activity (e.g. a heartbeat) without counting a delivered notification.</summary>
+        public void MarkActivity()
+        {
+            Touch();
+        }
+
         public void MarkDelivered()
         {
             Interlocked.Increment(ref _notificationsSent);
