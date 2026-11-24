@@ -23,6 +23,20 @@ public class DashboardEndpointTests
         Assert.True(json.GetProperty("isSuccess").GetBoolean());
     }
 
+    [Theory]
+    [InlineData("", "text/html; charset=utf-8")]
+    [InlineData("/app.js", "text/javascript; charset=utf-8")]
+    [InlineData("/app.css", "text/css; charset=utf-8")]
+    public async Task DashboardFiles_ServedWithExpectedContentType(string suffix, string expected)
+    {
+        await using var host = await PingDropHost.StartAsync();
+
+        var res = await host.Client.GetAsync($"{Base}{suffix}");
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal(expected, res.Content.Headers.ContentType?.ToString());
+    }
+
     [Fact]
     public async Task About_ReturnsSuccessEnvelope()
     {

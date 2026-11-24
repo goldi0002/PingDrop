@@ -255,19 +255,19 @@ namespace PingDrop.Extensions
             endpoints.MapGet(options.Dashboard.Path + "/app.css", async context =>
             {
                 string css = await PDEmbeddedFileProvider.ReadAsync("app.css");
-                context.Response.ContentType = "text/css";
+                context.Response.ContentType = "text/css; charset=utf-8";
                 await context.Response.WriteAsync(css);
             });
             endpoints.MapGet(options.Dashboard.Path + "/app.js", async context =>
             {
                 string? js = await PDEmbeddedFileProvider.ReadAsync("app.js");
-                context.Response.ContentType = "text/javscript";
+                context.Response.ContentType = "text/javascript; charset=utf-8";
                 await context.Response.WriteAsync(js);
             });
             endpoints.MapGet(options.Dashboard.Path, async context =>
             {
                 string? dashboard = await PDEmbeddedFileProvider.ReadAsync("Index.html");
-                context.Response.ContentType = "text/html";
+                context.Response.ContentType = "text/html; charset=utf-8";
                 dashboard = dashboard.Replace("{{DASHBOARD_PATH}}", options.Dashboard.Path);
                 dashboard = dashboard.Replace("{{DASHBOARD_TITLE}}", !string.IsNullOrEmpty(options.Dashboard.Title) ? options.Dashboard.Title : "PingDrop Dashboard");
                 await context.Response.WriteAsync(dashboard);

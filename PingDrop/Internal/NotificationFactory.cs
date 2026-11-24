@@ -6,6 +6,10 @@ namespace PingDrop.Internal
 {
     internal sealed class NotificationFactory : INotificationFactory
     {
+        /// <remarks>
+        /// Event ids are per-process and monotonic (starting at 1 on every process start). They are not durable
+        /// across restarts and must not be used as a persistent or cross-instance identifier.
+        /// </remarks>
         private long _eventId;
 
         public PDNotification CreateNotification<T>(T notification, string eventType, string? targetKey = null)

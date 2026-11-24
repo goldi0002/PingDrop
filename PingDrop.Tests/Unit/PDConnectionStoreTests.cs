@@ -53,4 +53,36 @@ public class PDConnectionStoreTests
 
         Assert.Equal(1, store.Count);
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("   \t")]
+    public void Add_BlankKey_IsNotIndexedAndHasNullKey(string blank)
+    {
+        var store = new PDConnectionStore();
+
+        var c = store.Add(null, blank);
+
+        Assert.Null(c.SubscriberKey);
+        Assert.Equal(1, store.Count);
+        Assert.Equal(0, store.CountByKey(blank));
+        Assert.Empty(store.GetByKey(blank));
+    }
+
+    [Fact]
+    public void Remove_BlankKey_LeavesNoLeftovers()
+    {
+        var store = new PDConnectionStore();
+        var a = store.Add(null, " ");
+        store.Remove(a.ConnectionId);
+
+        var b = store.Add(null, " ");
+
+        Assert.Equal(1, store.Count);
+        Assert.Equal(0, store.CountByKey(" "));
+        Assert.Empty(store.GetByKey(" "));
+        store.Remove(b.ConnectionId);
+        Assert.Equal(0, store.Count);
+    }
 }

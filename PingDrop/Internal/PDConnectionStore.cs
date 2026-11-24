@@ -10,20 +10,24 @@ namespace PingDrop.Internal
         public int Count => _all.Count;
         public int CountByKey(string subscriberKey)
         {
-            return _byKey.TryGetValue(subscriberKey, out var bucket)
+            return !string.IsNullOrWhiteSpace(subscriberKey) && _byKey.TryGetValue(subscriberKey, out var bucket)
             ? bucket.Count
             : 0;
         }
 
         public PDClientConnection Add(HashSet<string>? eventTypes, string? subscriberKey = null)
         {
-            var client = string.IsNullOrEmpty(subscriberKey)
+            // Null, empty and whitespace-only keys all mean "no key": they are not indexed.
+            if (string.IsNullOrWhiteSpace(subscriberKey))
+                subscriberKey = null;
+
+            var client = subscriberKey is null
             ? new PDClientConnection(eventTypes)
             : new PDClientConnection(eventTypes, subscriberKey);
 
             _all[client.ConnectionId] = client;
 
-            if (!string.IsNullOrEmpty(subscriberKey))
+            if (subscriberKey is not null)
             {
                 var bucket = _byKey.GetOrAdd(subscriberKey, _ => new ConcurrentDictionary<long, PDClientConnection>());
                 bucket[client.ConnectionId] = client;
@@ -39,7 +43,7 @@ namespace PingDrop.Internal
 
         public IEnumerable<PDClientConnection> GetByKey(string subscriberKey)
         {
-            return _byKey.TryGetValue(subscriberKey, out var bucket)
+            return !string.IsNullOrWhiteSpace(subscriberKey) && _byKey.TryGetValue(subscriberKey, out var bucket)
             ? bucket.Values
             : [];
         }
