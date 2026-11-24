@@ -9,23 +9,31 @@
 		<Description> Lightweight real-time notification framework for ASP.NET Core applications. </Description>
 		<PackageTags>notifications realtime sse websocket aspnetcore</PackageTags>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<!--<RepositoryUrl>https://github.com/yourusername/PingDrop</RepositoryUrl>
+		<RepositoryUrl>https://github.com/goldi0002/PingDrop</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageProjectUrl>https://github.com/yourusername/PingDrop</PackageProjectUrl>-->
+		<PackageProjectUrl>https://github.com/goldi0002/PingDrop</PackageProjectUrl>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageIcon>icon.png</PackageIcon>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
 		<PackageReleaseNotes>
 			Initial release of PingDrop.
 		</PackageReleaseNotes>
 	</PropertyGroup>
+	<PropertyGroup Condition="'$(CI)' != ''">
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+	</PropertyGroup>
 	<ItemGroup>
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 	</ItemGroup>
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+		<PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
 	</ItemGroup>
 	<ItemGroup>
 		<InternalsVisibleTo Include="PingDrop.Tests" />
